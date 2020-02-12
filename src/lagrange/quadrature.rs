@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 
 fn get_x_pow(x_0: f64, x: f64, order: usize) -> Vec<f64> {
     let mut x_pow: Vec<f64> = Vec::with_capacity(order);
-    for i in 1..order + 1 {
+    for i in 1..=order + 1 {
         x_pow.push(x.powi(i as i32) - x_0.powi(i as i32))
     }
     x_pow
@@ -43,7 +43,7 @@ fn w_4(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
     1.0 / 60.0
         * (60.0 * times[0] * times[1] * times[2] * times[3] * x_pow[0]
             - 30.0
-                * (times[0] * times[1] * (times[2] * times[3])
+                * (times[0] * times[1] * (times[2] + times[3])
                     + times[0] * times[2] * times[3]
                     + times[1] * times[2] * times[3])
                 * x_pow[1]
@@ -82,10 +82,35 @@ mod tests {
         // test one hand calculated one
         let x_0: f64 = 2.0;
         let x: f64 = 3.0;
-        let ans = get_x_pow(x_0, x, 4);
+        let ans = get_x_pow(x_0, x, 3);
         let truth = vec![1.0, 5.0, 19.0, 65.0];
         for i in 0..ans.len() {
             assert_eq!(ans[i], truth[i]);
+        }
+    }
+
+    #[test]
+    fn validate_weights() {
+        // Checks that weights match integral from wolfram alpha
+        let x_0 = 1.0;
+        let x = 5.0;
+        let times = VecDeque::from(vec![5.0, 3.0, 2.5, 1.0]);
+
+        // Computed using wolfram alpha
+        let w_trues = vec![4.0, -8.0, 5.333333333333333, -8.0, -8.533333333333333];
+        const TOL: f64 = 1.0e-10;
+
+        let x_pows = get_x_pow(x_0, x, 4);
+        let w_est = vec![
+            w_0(&x_pows),
+            w_1(&x_pows, &times),
+            w_2(&x_pows, &times),
+            w_3(&x_pows, &times),
+            w_4(&x_pows, &times),
+        ];
+
+        for idx in 0..=4 {
+            assert!((w_trues[idx] - w_est[idx]).abs() < TOL);
         }
     }
 }
