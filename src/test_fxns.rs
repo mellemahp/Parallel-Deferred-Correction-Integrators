@@ -16,7 +16,6 @@ use std::f64::consts::PI;
 // === End Imports ===
 
 // Helper functions
-// TODO: Replace finite differencing with auto-diff
 pub fn newton_raphson_fdiff<F>(funcd: F, y1: f64, yacc: f64) -> Result<f64, &'static str>
 where
     F: Fn(f64) -> f64,

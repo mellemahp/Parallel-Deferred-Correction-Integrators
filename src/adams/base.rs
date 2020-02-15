@@ -2,8 +2,8 @@ extern crate nalgebra as na;
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, VectorN};
 
-use super::div_diff::divided_diff;
 use super::primer::MultiStepPrimer;
+use crate::lagrange::div_diff::divided_diff;
 use std::collections::VecDeque;
 
 use super::traits::{
