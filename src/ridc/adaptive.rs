@@ -14,13 +14,13 @@ use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 // local imports
 use crate::lagrange::quadrature::{get_weights, get_x_pow, specific_weights};
 use crate::newton_raphson::newton_raphson_fdiff;
-use crate::runge_kutta::adaptive::AdaptiveStep;
-use crate::runge_kutta::common::{IntegResult, RkOrder, StepWithError};
+use crate::runge_kutta::adaptive::{AdaptiveStep, StepValid};
+use crate::runge_kutta::common::{IntegResult, StepResult};
 use crate::runge_kutta::embedded::EmbeddedRKStepper;
-use crate::runge_kutta::rk_embed::RK32;
 
 // Standard library imports
 use std::collections::VecDeque;
+use std::marker::Send;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
@@ -43,6 +43,8 @@ where
     pub poly_order: Option<usize>,
     // Number of corrections to apply. Corresponds to number of additional threads spawned
     pub corrector_order: Option<usize>,
+    // Number of steps to take before restarting the integrator
+    pub restart_length: Option<usize>,
 }
 impl<N: DimName + Dim> IntegOptionsParallel<N>
 where
@@ -55,21 +57,30 @@ where
             min_step: None,
             poly_order: None,
             corrector_order: None,
+            restart_length: None,
         }
     }
 }
 
 pub trait RIDCInteg: AdaptiveStep {
-    fn parallel_integrate<N: DimName + Dim>(
+    fn parallel_integrater<N: Dim + DimName + DimMin<N> + DimSub<U1>>(
         &self,
         fxn: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
         t_0: f64,
-        y_0: VectorN<f64, N>,
+        y_0: &VectorN<f64, N>,
         step: f64,
         integ_opts: IntegOptionsParallel<N>,
     ) -> Result<IntegResult<N>, &'static str>
     where
-        DefaultAllocator: Allocator<f64, N>,
+        DefaultAllocator: Allocator<f64, N>
+            + Allocator<f64, N, N>
+            + Allocator<f64, <N as DimMin<N>>::Output, N>
+            + Allocator<f64, <N as DimMin<N>>::Output>
+            + Allocator<f64, N, <N as DimMin<N>>::Output>
+            + Allocator<f64, <<N as DimMin<N>>::Output as DimSub<U1>>::Output>,
+        <N as DimMin<N>>::Output: DimName,
+        <N as DimMin<N>>::Output: DimSub<U1>,
+        <DefaultAllocator as Allocator<f64, N>>::Buffer: Send + Sync,
     {
         // Unwrap Options to defaults
         let atol = integ_opts
@@ -79,9 +90,10 @@ pub trait RIDCInteg: AdaptiveStep {
         let min_step_size = integ_opts.min_step.unwrap_or(1e-10_f64);
         let poly_order = integ_opts.poly_order.unwrap_or(3); // ONLY 3 is currently supported
         let corrector_order = integ_opts.corrector_order.unwrap_or(poly_order);
+        let restart_length = integ_opts.restart_length.unwrap_or(100);
 
         // Initialize results struct and other integration variables
-        let mut results = IntegResult::new(t_0, y_0);
+        let mut results = IntegResult::new(t_0, y_0.clone());
         let t_end = t_0 + step;
         let mut sub_step = step;
         let mut step_res: StepResult<N>;
@@ -89,32 +101,153 @@ pub trait RIDCInteg: AdaptiveStep {
         let backward: bool = step < 0.0;
 
         // Spawn all channels
-        let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>) = Vec::new(); 
-        channels.push(mspc::channel());
-        for _ in 0..poly_order { 
-            channels.push(mspc::channel());
+        let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>)> = Vec::new();
+        channels.push(mpsc::channel());
+        for _ in 0..corrector_order {
+            channels.push(mpsc::channel());
         }
-        // root channels used by the predictor thread 
-        let root_tx = channels[0].0; 
-        let root_rx = channels[poly_order - 1].1;
+        // root channels used by the predictor thread
+        let channels_root = channels.pop().unwrap();
+        let root_tx = channels_root.0;
+        let mut last_rx = channels_root.1;
 
         // generate threads
-        let mut thread_handles: Vec<thread::JoinHandle<_>> = Vec::new(); 
-        for i in 0..poly_order { 
-            let corrector = Corrector::new(
+        let mut thread_handles: Vec<thread::JoinHandle<Result<(), &'static str>>> = Vec::new();
+        for i in 0..corrector_order {
+            let chan = channels.pop().unwrap();
+            let mut corrector = Corrector::new(
                 poly_order,
-                dynamics: fxn,
-                y_0,
-                dy_0: VectorN::<f64, N>::zeros(),
+                fxn,
+                &y_0,
+                &VectorN::<f64, N>::zeros(),
                 t_0,
-                rx: channels[i].1,
-                tx: channels[i + 1].0,
+                last_rx,
+                chan.0,
             );
-            let t1 = thread::spawn(move || corrector.run());
+            last_rx = chan.1;
+            let handler = thread::spawn(move || corrector.run());
+            thread_handles.push(handler);
         }
+        let root_rx = last_rx;
 
         // start the integrator
-        
+        let mut y_last = y_0.clone();
+        let mut counter = 1;
+        while results.t != t_end {
+            // Ensures integrator does not over-step the goal
+            if (backward && sub_step.abs() > (t_end - results.t).abs())
+                || (!backward && sub_step > (t_end - results.t))
+            {
+                sub_step = t_end - results.t;
+            } else if sub_step.abs() < min_step_size {
+                return Err("Step size is below minimum allowable step size");
+            };
+
+            step_res = self.step(fxn, results.t, &y_last, sub_step, &atol, rtol);
+            step_revision = self.revise_step(step_res.error, sub_step);
+
+            match step_revision {
+                StepValid::Accept(nxt_step) => {
+                    if counter < poly_order + 1 {
+                        results.t += sub_step;
+                        results.times.push(results.t);
+                        root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
+                            y_nxt: step_res.value.clone(),
+                            // TODO this should really not be re-computed here
+                            dy_nxt: fxn(results.t, &step_res.value),
+                            t_nxt: results.t.clone(),
+                            weights: None,
+                        }));
+                        y_last = step_res.value;
+                        sub_step = nxt_step;
+                        counter += 1;
+                    } else if counter % restart_length == 0 {
+                        results.t += sub_step;
+                        let x_pows = get_x_pow(
+                            results.times[results.times.len() - 1],
+                            results.t,
+                            poly_order,
+                        );
+                        results.times.push(results.t);
+
+                        root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
+                            y_nxt: step_res.value.clone(),
+                            // TODO this should really not be re-computed here
+                            dy_nxt: fxn(results.t, &step_res.value),
+                            t_nxt: results.t.clone(),
+                            weights: Some(specific_weights(
+                                x_pows,
+                                &get_weights(&VecDeque::from(results.times.clone())),
+                            )),
+                        }));
+                        sub_step = nxt_step;
+                        counter += 1;
+                        while results.states.len() < counter {
+                            match root_rx.recv() {
+                                Ok(msg) => match msg {
+                                    IVPSolMsg::PROCESS(data) => {
+                                        results.states.push(data.y_nxt);
+                                    }
+                                    IVPSolMsg::TERMINATE => {
+                                        return Err("Somehow the root thread recieved a terminate command. Cry yourself to sleep");
+                                    }
+                                },
+                                Err(_) => {
+                                    return Err("Something went terribly wrong");
+                                }
+                            };
+                        }
+                        y_last = results.states[results.states.len() - 1].clone();
+                    } else {
+                        results.t += sub_step;
+                        let x_pows = get_x_pow(
+                            results.times[results.times.len() - 1],
+                            results.t,
+                            poly_order,
+                        );
+                        results.times.push(results.t);
+                        root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
+                            y_nxt: step_res.value.clone(),
+                            // TODO this should really not be re-computed here
+                            dy_nxt: fxn(results.t, &step_res.value),
+                            t_nxt: results.t.clone(),
+                            weights: Some(specific_weights(
+                                x_pows,
+                                &get_weights(&VecDeque::from(results.times.clone())),
+                            )),
+                        }));
+                        y_last = step_res.value;
+                        sub_step = nxt_step;
+                        counter += 1;
+                    }
+                }
+                StepValid::Refine(nxt_step) => {
+                    sub_step = nxt_step;
+                }
+            }
+        }
+        if results.times.len() != results.states.len() {
+            while results.times.len() != results.states.len() {
+                match root_rx.recv() {
+                    Ok(msg) => match msg {
+                        IVPSolMsg::PROCESS(data) => {
+                            results.states.push(data.y_nxt);
+                        }
+                        IVPSolMsg::TERMINATE => {
+                            return Err("Somehow the root thread recieved a terminate command. Cry yourself to sleep");
+                        }
+                    },
+                    Err(_) => {
+                        return Err("Something went terribly wrong");
+                    }
+                };
+            }
+        }
+        root_tx.send(IVPSolMsg::TERMINATE);
+        for i in 0..thread_handles.len() {
+            thread_handles.pop().unwrap().join();
+        }
+        Ok(results)
     }
 }
 
@@ -133,6 +266,7 @@ where
         + Allocator<f64, <<N as DimMin<N>>::Output as DimSub<U1>>::Output>,
     <N as DimMin<N>>::Output: DimName,
     <N as DimMin<N>>::Output: DimSub<U1>,
+    <DefaultAllocator as Allocator<f64, N>>::Buffer: Send + Sync,
 {
     // Order, M, of the polynomial fit to use for quadrature. Requires M+1 points
     poly_order: usize,
@@ -160,6 +294,7 @@ where
         + Allocator<f64, <<N as DimMin<N>>::Output as DimSub<U1>>::Output>,
     <N as DimMin<N>>::Output: DimName,
     <N as DimMin<N>>::Output: DimSub<U1>,
+    <DefaultAllocator as Allocator<f64, N>>::Buffer: Send + Sync,
 {
     fn new(
         poly_order: usize,
@@ -287,6 +422,4 @@ where
 
 // Tests
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}
