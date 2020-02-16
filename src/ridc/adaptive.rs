@@ -14,6 +14,9 @@ use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 // local imports
 use crate::lagrange::quadrature::{get_weights, get_x_pow, specific_weights};
 use crate::newton_raphson::newton_raphson_fdiff;
+use crate::runge_kutta::adaptive::AdaptiveStep;
+use crate::runge_kutta::common::{IntegResult, RkOrder, StepWithError};
+use crate::runge_kutta::embedded::EmbeddedRKStepper;
 use crate::runge_kutta::rk_embed::RK32;
 
 // Standard library imports
@@ -23,6 +26,102 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 
 // === End Imports ===
+
+// Integrator Traits
+#[derive(Debug, Clone, PartialEq)]
+pub struct IntegOptionsParallel<N: DimName + Dim>
+where
+    DefaultAllocator: Allocator<f64, N>,
+{
+    // Absolute tolerance to use for RK predictor
+    pub atol: Option<VectorN<f64, N>>,
+    // Relative tolerance to use for RK predictor
+    pub rtol: Option<f64>,
+    // Minimum step allowed for RK predictor
+    pub min_step: Option<f64>,
+    // Order of polynomial fit for correctors to use
+    pub poly_order: Option<usize>,
+    // Number of corrections to apply. Corresponds to number of additional threads spawned
+    pub corrector_order: Option<usize>,
+}
+impl<N: DimName + Dim> IntegOptionsParallel<N>
+where
+    DefaultAllocator: Allocator<f64, N>,
+{
+    pub fn default() -> Self {
+        Self {
+            atol: None,
+            rtol: None,
+            min_step: None,
+            poly_order: None,
+            corrector_order: None,
+        }
+    }
+}
+
+pub trait RIDCInteg: AdaptiveStep {
+    fn parallel_integrate<N: DimName + Dim>(
+        &self,
+        fxn: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
+        t_0: f64,
+        y_0: VectorN<f64, N>,
+        step: f64,
+        integ_opts: IntegOptionsParallel<N>,
+    ) -> Result<IntegResult<N>, &'static str>
+    where
+        DefaultAllocator: Allocator<f64, N>,
+    {
+        // Unwrap Options to defaults
+        let atol = integ_opts
+            .atol
+            .unwrap_or(VectorN::<f64, N>::repeat(1e-3_f64));
+        let rtol = integ_opts.rtol.unwrap_or(1e-6_f64);
+        let min_step_size = integ_opts.min_step.unwrap_or(1e-10_f64);
+        let poly_order = integ_opts.poly_order.unwrap_or(3); // ONLY 3 is currently supported
+        let corrector_order = integ_opts.corrector_order.unwrap_or(poly_order);
+
+        // Initialize results struct and other integration variables
+        let mut results = IntegResult::new(t_0, y_0);
+        let t_end = t_0 + step;
+        let mut sub_step = step;
+        let mut step_res: StepResult<N>;
+        let mut step_revision: StepValid;
+        let backward: bool = step < 0.0;
+
+        // Spawn all channels
+        let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>) = Vec::new(); 
+        channels.push(mspc::channel());
+        for _ in 0..poly_order { 
+            channels.push(mspc::channel());
+        }
+        // root channels used by the predictor thread 
+        let root_tx = channels[0].0; 
+        let root_rx = channels[poly_order - 1].1;
+
+        // generate threads
+        let mut thread_handles: Vec<thread::JoinHandle<_>> = Vec::new(); 
+        for i in 0..poly_order { 
+            let corrector = Corrector::new(
+                poly_order,
+                dynamics: fxn,
+                y_0,
+                dy_0: VectorN::<f64, N>::zeros(),
+                t_0,
+                rx: channels[i].1,
+                tx: channels[i + 1].0,
+            );
+            let t1 = thread::spawn(move || corrector.run());
+        }
+
+        // start the integrator
+        
+    }
+}
+
+impl<D: DimName + Dim> RIDCInteg for EmbeddedRKStepper<D> where
+    DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>
+{
+}
 
 struct Corrector<N: Dim + DimName + DimMin<N> + DimSub<U1>>
 where
