@@ -63,7 +63,7 @@ where
 }
 
 pub trait RIDCInteg: AdaptiveStep {
-    fn parallel_integrater<N: Dim + DimName + DimMin<N> + DimSub<U1>>(
+    fn parallel_integrator<N: Dim + DimName + DimMin<N> + DimSub<U1>>(
         &self,
         fxn: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
         t_0: f64,
@@ -92,6 +92,8 @@ pub trait RIDCInteg: AdaptiveStep {
         let corrector_order = integ_opts.corrector_order.unwrap_or(poly_order);
         let restart_length = integ_opts.restart_length.unwrap_or(100);
 
+        println!("[ROOT] INITIALIZED DEFAULTS");
+
         // Initialize results struct and other integration variables
         let mut results = IntegResult::new(t_0, y_0.clone());
         let t_end = t_0 + step;
@@ -100,16 +102,21 @@ pub trait RIDCInteg: AdaptiveStep {
         let mut step_revision: StepValid;
         let backward: bool = step < 0.0;
 
+        println!("[ROOT] INITIALIZED RESULTS");
+
         // Spawn all channels
         let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>)> = Vec::new();
         channels.push(mpsc::channel());
         for _ in 0..corrector_order {
             channels.push(mpsc::channel());
         }
+
         // root channels used by the predictor thread
         let channels_root = channels.pop().unwrap();
         let root_tx = channels_root.0;
         let mut last_rx = channels_root.1;
+
+        println!("[ROOT] INITIALIZED CHANNELS");
 
         // generate threads
         let mut thread_handles: Vec<thread::JoinHandle<Result<(), &'static str>>> = Vec::new();
@@ -123,12 +130,18 @@ pub trait RIDCInteg: AdaptiveStep {
                 t_0,
                 last_rx,
                 chan.0,
+                i as u32,
             );
             last_rx = chan.1;
-            let handler = thread::spawn(move || corrector.run());
+            let handler = thread::Builder::new()
+                .name(format!("THREAD {}", i))
+                .spawn(move || corrector.run())
+                .unwrap();
             thread_handles.push(handler);
         }
         let root_rx = last_rx;
+
+        println!("[ROOT] INITIALIZED THREADS");
 
         // start the integrator
         let mut y_last = y_0.clone();
@@ -160,8 +173,16 @@ pub trait RIDCInteg: AdaptiveStep {
                         }));
                         y_last = step_res.value;
                         sub_step = nxt_step;
+
+                        println!("[ROOT] GENERATED INIT PT {}", counter);
+
                         counter += 1;
                     } else if counter % restart_length == 0 {
+                        println!(
+                            "[ROOT] HIT A RESTART. TIME TO COLLECT THINGS! | {}",
+                            counter
+                        );
+
                         results.t += sub_step;
                         let x_pows = get_x_pow(
                             results.times[results.times.len() - 1],
@@ -182,6 +203,7 @@ pub trait RIDCInteg: AdaptiveStep {
                         }));
                         sub_step = nxt_step;
                         counter += 1;
+
                         while results.states.len() < counter {
                             match root_rx.recv() {
                                 Ok(msg) => match msg {
@@ -216,6 +238,7 @@ pub trait RIDCInteg: AdaptiveStep {
                                 &get_weights(&VecDeque::from(results.times.clone())),
                             )),
                         }));
+                        println!("[ROOT] GENERATED REG PT {} | t: {}", counter, results.t);
                         y_last = step_res.value;
                         sub_step = nxt_step;
                         counter += 1;
@@ -232,21 +255,24 @@ pub trait RIDCInteg: AdaptiveStep {
                     Ok(msg) => match msg {
                         IVPSolMsg::PROCESS(data) => {
                             results.states.push(data.y_nxt);
+                            println!("[ROOT] Collected a point! Up to {}", results.states.len());
                         }
                         IVPSolMsg::TERMINATE => {
                             return Err("Somehow the root thread recieved a terminate command. Cry yourself to sleep");
                         }
                     },
-                    Err(_) => {
+                    Err(err) => {
+                        println!("{:?}", err);
                         return Err("Something went terribly wrong");
                     }
                 };
             }
         }
+        println!("Somehow got here....");
         root_tx.send(IVPSolMsg::TERMINATE);
-        for i in 0..thread_handles.len() {
-            thread_handles.pop().unwrap().join();
-        }
+        //for i in 0..thread_handles.len() {
+        //    thread_handles.pop().unwrap().join();
+        //}
         Ok(results)
     }
 }
@@ -282,6 +308,8 @@ where
     rx: Receiver<IVPSolMsg<N>>,
     // Handle for sending messages on channel
     tx: Sender<IVPSolMsg<N>>,
+    // Thread Number. An ID for helping with debugging
+    id: u32,
 }
 
 impl<N: Dim + DimName + DimMin<N> + DimSub<U1>> Corrector<N>
@@ -304,6 +332,7 @@ where
         t_0: f64,
         rx: Receiver<IVPSolMsg<N>>,
         tx: Sender<IVPSolMsg<N>>,
+        id: u32,
     ) -> Self {
         let mut fxn_evals: VecDeque<VectorN<f64, N>> = VecDeque::from(vec![y_0.clone()]);
         fxn_evals.reserve_exact(poly_order);
@@ -320,10 +349,12 @@ where
             times,
             rx,
             tx,
+            id,
         }
     }
 
     fn run(&mut self) -> Result<(), &'static str> {
+        // initialization loop
         loop {
             let data = match self.rx.recv() {
                 Ok(msg) => match msg {
@@ -336,35 +367,67 @@ where
                     break;
                 }
             };
-            if self.fxn_ests.len() < self.poly_order + 1 {
-                self.initialize(data)?;
-            } else {
-                self.correct(data)?;
+            println!(
+                "[THREAD {}] RECIEVED INIT PT{}",
+                self.id,
+                self.fxn_ests.len()
+            );
+            match self.initialize(data) {
+                Ok(i) => match i {
+                    0 => continue,
+                    1 => break,
+                    _ => break,
+                },
+                Err(_) => break,
             }
+        }
+        loop {
+            let data = match self.rx.recv() {
+                Ok(msg) => match msg {
+                    IVPSolMsg::PROCESS(data) => data,
+                    IVPSolMsg::TERMINATE => {
+                        break;
+                    }
+                },
+                Err(_) => {
+                    break;
+                }
+            };
+            self.correct(data)?;
         }
         Ok(())
     }
 
-    fn initialize(&mut self, data: IVPSolData<N>) -> Result<(), &'static str> {
+    fn initialize(&mut self, data: IVPSolData<N>) -> Result<u32, &'static str> {
         self.fxn_ests.push_front(data.y_nxt);
         self.fxn_evals.push_front(data.dy_nxt);
         self.times.push_front(data.t_nxt);
 
         if self.fxn_ests.len() == self.poly_order + 1 {
+            println!(
+                "[THREAD {}]  Making first correction! LEN {}",
+                self.id,
+                self.fxn_ests.len()
+            );
             self.first_correction()?;
+            Ok(1)
+        } else {
+            Ok(0)
         }
-        Ok(())
     }
 
     fn first_correction(&mut self) -> Result<(), &'static str> {
-        const CONV_TOL: f64 = 1.0e-7_f64;
+        const CONV_TOL: f64 = 1.0e-4_f64;
 
         let gen_weights = get_weights(&self.times);
-        let l = self.times.len();
-        for i in 0..l {
+        let l = self.poly_order + 1;
+        for i in 0..l - 1 {
             // Find new quadrature
-            let t_0 = self.times[l - i - 2];
-            let t_n = self.times[l - i - 1];
+            let t_0 = self.times[l - i - 1];
+            let t_n = self.times[l - i - 2];
+
+            println!("[THREAD {}] T_0: {} | T_N: {}", self.id, t_0, t_n);
+
             let dt = t_n - t_0;
             let x_pows = get_x_pow(t_0, t_n, self.poly_order);
             let spec_weights = specific_weights(x_pows, &gen_weights);
@@ -377,7 +440,7 @@ where
             let root_problem = |y_n: &VectorN<f64, N>| {
                 y_n - (&self.fxn_ests[l - i - 1]
                     - dt * (self.dynamics)(t_n, y_n)
-                    - dt * &self.fxn_evals[l - i - 1]
+                    - dt * &self.fxn_evals[l - i - 2]
                     + &quadrature)
             };
             self.fxn_ests[l - i - 1] =
@@ -392,11 +455,72 @@ where
                 weights: None,
             });
             self.tx.send(data_new);
+            println!("[THREAD {}] Sent first corr {}", self.id, i);
         }
         Ok(())
     }
 
     fn correct(&mut self, data: IVPSolData<N>) -> Result<(), &'static str> {
+        // convergence tolerance
+        const CONV_TOL: f64 = 1.0e-4_f64;
+
+        println!("[THREAD {}] GOT TO A NORMAL CORRECTION", self.id);
+
+        // rotate out the oldest point before adding new ones to avoid re-allocation
+        self.fxn_ests
+            .pop_back()
+            .expect("Could not append new state");
+        self.fxn_evals
+            .pop_back()
+            .expect("Could not append new dynamics evaluation");
+        self.times.pop_back().expect("Could not append new time");
+
+        println!("[THREAD {}] ROTATED OUT THE OLD VALUES!", self.id);
+
+        // add the new points from the IVP message
+        self.fxn_evals.push_front(data.y_nxt);
+        self.fxn_evals.push_front(data.dy_nxt);
+        self.times.push_front(data.t_nxt);
+
+        // compute correction
+        let quadrature: VectorN<f64, N> = data
+            .weights
+            .clone()
+            .unwrap()
+            .iter()
+            .zip(self.fxn_evals.iter())
+            .map(|(w, y)| *w * y)
+            .sum();
+
+        println!("[THREAD {}] GENERATED CORR QUADRATURE", self.id);
+
+        let dt = self.times[0] - self.times[1];
+        let root_problem = |y_n: &VectorN<f64, N>| {
+            y_n - (&self.fxn_ests[0]
+                - dt * (self.dynamics)(self.times[0], y_n)
+                - dt * &self.fxn_evals[0]
+                + &quadrature)
+        };
+
+        self.fxn_ests[0] =
+            newton_raphson_fdiff(root_problem, self.fxn_ests[0].clone(), CONV_TOL).unwrap();
+
+        println!("[THREAD {}] SURVIVED THE SCARY ROOT PROBLEM!", self.id);
+
+        // re-evaluate the dynamics function
+        self.fxn_evals[0] = (self.dynamics)(self.times[0], &self.fxn_ests[0]);
+
+        println!("[THREAD {}] Re-evaluated the function", self.id);
+
+        let data_new = IVPSolMsg::PROCESS(IVPSolData {
+            y_nxt: self.fxn_ests[0].clone(),
+            dy_nxt: self.fxn_evals[0].clone(),
+            t_nxt: self.times[0].clone(),
+            weights: data.weights,
+        });
+        self.tx.send(data_new);
+        println!("[THREAD {}] Sent a correction!", self.id);
+
         Ok(())
     }
 }
@@ -422,4 +546,18 @@ where
 
 // Tests
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::runge_kutta::rk_embed::RK32;
+    use crate::test_fxns::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
+
+    #[test]
+    fn test_ridc() {
+        let time_end = 1.0;
+        let dt = time_end + IT_2_D;
+        let options = IntegOptionsParallel::default();
+        let ans = RK32.parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, options);
+        println!("EST | {:?}", ans.unwrap().states);
+        println!("TRUE | {:?}", two_d_solution(time_end));
+    }
+}
