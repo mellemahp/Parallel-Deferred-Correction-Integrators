@@ -85,14 +85,14 @@ pub trait RIDCInteg: AdaptiveStep {
         // Unwrap Options to defaults
         let atol = integ_opts
             .atol
-            .unwrap_or(VectorN::<f64, N>::repeat(1e-3_f64));
-        let rtol = integ_opts.rtol.unwrap_or(1e-6_f64);
+            .unwrap_or(VectorN::<f64, N>::repeat(1e-4_f64));
+        let rtol = integ_opts.rtol.unwrap_or(1e-7_f64);
         let min_step_size = integ_opts.min_step.unwrap_or(1e-10_f64);
         let poly_order = integ_opts.poly_order.unwrap_or(3); // ONLY 3 is currently supported
         let corrector_order = integ_opts.corrector_order.unwrap_or(poly_order);
-        let restart_length = integ_opts.restart_length.unwrap_or(100);
+        let restart_length = integ_opts.restart_length.unwrap_or(50);
 
-        println!("[ROOT] INITIALIZED DEFAULTS");
+        //println!("[ROOT] INITIALIZED DEFAULTS");
 
         // Initialize results struct and other integration variables
         let mut results = IntegResult::new(t_0, y_0.clone());
@@ -102,7 +102,7 @@ pub trait RIDCInteg: AdaptiveStep {
         let mut step_revision: StepValid;
         let backward: bool = step < 0.0;
 
-        println!("[ROOT] INITIALIZED RESULTS");
+        //println!("[ROOT] INITIALIZED RESULTS");
 
         // Spawn all channels
         let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>)> = Vec::new();
@@ -116,7 +116,7 @@ pub trait RIDCInteg: AdaptiveStep {
         let root_tx = channels_root.0;
         let mut last_rx = channels_root.1;
 
-        println!("[ROOT] INITIALIZED CHANNELS");
+        //println!("[ROOT] INITIALIZED CHANNELS");
 
         // generate threads
         let mut thread_handles: Vec<thread::JoinHandle<Result<(), &'static str>>> = Vec::new();
@@ -126,7 +126,7 @@ pub trait RIDCInteg: AdaptiveStep {
                 poly_order,
                 fxn,
                 &y_0,
-                &VectorN::<f64, N>::zeros(),
+                &fxn(t_0, &y_0),
                 t_0,
                 last_rx,
                 chan.0,
@@ -141,11 +141,17 @@ pub trait RIDCInteg: AdaptiveStep {
         }
         let root_rx = last_rx;
 
-        println!("[ROOT] INITIALIZED THREADS");
+        // println!("[ROOT] INITIALIZED THREADS");
 
-        // start the integrator
+        // initialize vals
         let mut y_last = y_0.clone();
         let mut counter = 1;
+        // Used to generate the weights for the quadrature. Quadrature uses a backwards
+        // form of the lagrange polynomial interpolation
+        let mut times_rev: VecDeque<f64> = VecDeque::from(vec![t_0]);
+        times_rev.reserve_exact(poly_order);
+
+        // start the RK integrator
         while results.t != t_end {
             // Ensures integrator does not over-step the goal
             if (backward && sub_step.abs() > (t_end - results.t).abs())
@@ -162,8 +168,12 @@ pub trait RIDCInteg: AdaptiveStep {
             match step_revision {
                 StepValid::Accept(nxt_step) => {
                     if counter < poly_order + 1 {
+                        // Update all times
                         results.t += sub_step;
                         results.times.push(results.t);
+                        times_rev.push_front(results.t);
+
+                        // send initialization point to corrector
                         root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
                             y_nxt: step_res.value.clone(),
                             // TODO this should really not be re-computed here
@@ -191,15 +201,16 @@ pub trait RIDCInteg: AdaptiveStep {
                         );
                         results.times.push(results.t);
 
+                        // rotate times into times vector
+                        times_rev.pop_back().expect("Could not pop old time");
+                        times_rev.push_front(results.t);
+
                         root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
                             y_nxt: step_res.value.clone(),
                             // TODO this should really not be re-computed here
                             dy_nxt: fxn(results.t, &step_res.value),
                             t_nxt: results.t.clone(),
-                            weights: Some(specific_weights(
-                                x_pows,
-                                &get_weights(&VecDeque::from(results.times.clone())),
-                            )),
+                            weights: Some(specific_weights(x_pows, &get_weights(&times_rev))),
                         }));
                         sub_step = nxt_step;
                         counter += 1;
@@ -222,23 +233,31 @@ pub trait RIDCInteg: AdaptiveStep {
                         y_last = results.states[results.states.len() - 1].clone();
                     } else {
                         results.t += sub_step;
+
+                        println!(
+                            "[ROOT] GENERATED REG PT {} | t: {} | s: {:?}",
+                            counter, results.t, step_res.value
+                        );
+
                         let x_pows = get_x_pow(
                             results.times[results.times.len() - 1],
                             results.t,
                             poly_order,
                         );
                         results.times.push(results.t);
+
+                        // rotate times into times vector
+                        times_rev.pop_back().expect("Could not pop old time");
+                        times_rev.push_front(results.t);
+
+                        // send estimate to the corrector
                         root_tx.send(IVPSolMsg::PROCESS(IVPSolData {
                             y_nxt: step_res.value.clone(),
                             // TODO this should really not be re-computed here
                             dy_nxt: fxn(results.t, &step_res.value),
                             t_nxt: results.t.clone(),
-                            weights: Some(specific_weights(
-                                x_pows,
-                                &get_weights(&VecDeque::from(results.times.clone())),
-                            )),
+                            weights: Some(specific_weights(x_pows, &get_weights(&times_rev))),
                         }));
-                        println!("[ROOT] GENERATED REG PT {} | t: {}", counter, results.t);
                         y_last = step_res.value;
                         sub_step = nxt_step;
                         counter += 1;
@@ -298,10 +317,10 @@ where
     poly_order: usize,
     // Dynamics function used for the initial value problem
     dynamics: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
+    // Corrected Estimates of the IVP solutions
+    y_ests: VecDeque<VectorN<f64, N>>,
     // Evaluations of the Dynamics function at the final corrected estimate
     fxn_evals: VecDeque<VectorN<f64, N>>,
-    // Corrected Estimates of the IVP solutions
-    fxn_ests: VecDeque<VectorN<f64, N>>,
     // Times at which function evals occur
     times: VecDeque<f64>,
     // Handle for recieving messages from channel
@@ -334,18 +353,18 @@ where
         tx: Sender<IVPSolMsg<N>>,
         id: u32,
     ) -> Self {
-        let mut fxn_evals: VecDeque<VectorN<f64, N>> = VecDeque::from(vec![y_0.clone()]);
+        let mut y_ests: VecDeque<VectorN<f64, N>> = VecDeque::from(vec![y_0.clone()]);
+        y_ests.reserve_exact(poly_order);
+        let mut fxn_evals: VecDeque<VectorN<f64, N>> = VecDeque::from(vec![dy_0.clone()]);
         fxn_evals.reserve_exact(poly_order);
-        let mut fxn_ests: VecDeque<VectorN<f64, N>> = VecDeque::from(vec![dy_0.clone()]);
-        fxn_ests.reserve_exact(poly_order);
         let mut times: VecDeque<f64> = VecDeque::from(vec![t_0]);
         times.reserve_exact(poly_order);
 
         Corrector {
             poly_order,
             dynamics,
+            y_ests,
             fxn_evals,
-            fxn_ests,
             times,
             rx,
             tx,
@@ -367,11 +386,7 @@ where
                     break;
                 }
             };
-            println!(
-                "[THREAD {}] RECIEVED INIT PT{}",
-                self.id,
-                self.fxn_ests.len()
-            );
+            println!("[THREAD {}] RECIEVED INIT PT{}", self.id, self.y_ests.len());
             match self.initialize(data) {
                 Ok(i) => match i {
                     0 => continue,
@@ -399,16 +414,11 @@ where
     }
 
     fn initialize(&mut self, data: IVPSolData<N>) -> Result<u32, &'static str> {
-        self.fxn_ests.push_front(data.y_nxt);
+        self.y_ests.push_front(data.y_nxt);
         self.fxn_evals.push_front(data.dy_nxt);
         self.times.push_front(data.t_nxt);
 
-        if self.fxn_ests.len() == self.poly_order + 1 {
-            println!(
-                "[THREAD {}]  Making first correction! LEN {}",
-                self.id,
-                self.fxn_ests.len()
-            );
+        if self.y_ests.len() == self.poly_order + 1 {
             self.first_correction()?;
             Ok(1)
         } else {
@@ -417,18 +427,18 @@ where
     }
 
     fn first_correction(&mut self) -> Result<(), &'static str> {
-        const CONV_TOL: f64 = 1.0e-4_f64;
+        const CONV_TOL: f64 = 1.0e-10_f64;
 
         let gen_weights = get_weights(&self.times);
+
         let l = self.poly_order + 1;
-        for i in 0..l - 1 {
-            // Find new quadrature
-            let t_0 = self.times[l - i - 1];
-            let t_n = self.times[l - i - 2];
-
-            println!("[THREAD {}] T_0: {} | T_N: {}", self.id, t_0, t_n);
-
+        for i in 1..l {
+            // set correction time interval
+            let t_0 = self.times[l - i];
+            let t_n = self.times[l - i - 1];
             let dt = t_n - t_0;
+
+            // Generate quadrature solution over the selected interval
             let x_pows = get_x_pow(t_0, t_n, self.poly_order);
             let spec_weights = specific_weights(x_pows, &gen_weights);
             let quadrature: VectorN<f64, N> = spec_weights
@@ -437,19 +447,21 @@ where
                 .map(|(w, y)| *w * y)
                 .sum();
 
+            // set up and solve implicit solution
             let root_problem = |y_n: &VectorN<f64, N>| {
-                y_n - (&self.fxn_ests[l - i - 1]
-                    - dt * (self.dynamics)(t_n, y_n)
-                    - dt * &self.fxn_evals[l - i - 2]
+                y_n - (&self.y_ests[l - i] + dt * (self.dynamics)(t_n, y_n)
+                    - dt * &self.fxn_evals[l - i - 1]
                     + &quadrature)
             };
-            self.fxn_ests[l - i - 1] =
-                newton_raphson_fdiff(root_problem, self.fxn_ests[l - i - 1].clone(), CONV_TOL)
-                    .unwrap();
-            self.fxn_evals[l - i - 1] = (self.dynamics)(t_n, &self.fxn_ests[l - i - 1]);
+
+            let root_sol =
+                newton_raphson_fdiff(root_problem, self.y_ests[l - i].clone(), CONV_TOL).unwrap();
+
+            self.y_ests[l - i - 1] = root_sol;
+            self.fxn_evals[l - i - 1] = (self.dynamics)(t_n, &self.y_ests[l - i - 1]);
 
             let data_new = IVPSolMsg::PROCESS(IVPSolData {
-                y_nxt: self.fxn_ests[l - i - 1].clone(),
+                y_nxt: self.y_ests[l - i - 1].clone(),
                 dy_nxt: self.fxn_evals[l - i - 1].clone(),
                 t_nxt: t_n,
                 weights: None,
@@ -462,23 +474,19 @@ where
 
     fn correct(&mut self, data: IVPSolData<N>) -> Result<(), &'static str> {
         // convergence tolerance
-        const CONV_TOL: f64 = 1.0e-4_f64;
+        const CONV_TOL: f64 = 1.0e-10_f64;
 
         println!("[THREAD {}] GOT TO A NORMAL CORRECTION", self.id);
 
         // rotate out the oldest point before adding new ones to avoid re-allocation
-        self.fxn_ests
-            .pop_back()
-            .expect("Could not append new state");
+        self.y_ests.pop_back().expect("Could not append new state");
         self.fxn_evals
             .pop_back()
             .expect("Could not append new dynamics evaluation");
         self.times.pop_back().expect("Could not append new time");
 
-        println!("[THREAD {}] ROTATED OUT THE OLD VALUES!", self.id);
-
         // add the new points from the IVP message
-        self.fxn_evals.push_front(data.y_nxt);
+        self.y_ests.push_front(data.y_nxt);
         self.fxn_evals.push_front(data.dy_nxt);
         self.times.push_front(data.t_nxt);
 
@@ -492,28 +500,25 @@ where
             .map(|(w, y)| *w * y)
             .sum();
 
-        println!("[THREAD {}] GENERATED CORR QUADRATURE", self.id);
-
         let dt = self.times[0] - self.times[1];
         let root_problem = |y_n: &VectorN<f64, N>| {
-            y_n - (&self.fxn_ests[0]
-                - dt * (self.dynamics)(self.times[0], y_n)
+            y_n - (&self.y_ests[1] + dt * (self.dynamics)(self.times[0], y_n)
                 - dt * &self.fxn_evals[0]
                 + &quadrature)
         };
 
-        self.fxn_ests[0] =
-            newton_raphson_fdiff(root_problem, self.fxn_ests[0].clone(), CONV_TOL).unwrap();
+        self.y_ests[0] = newton_raphson_fdiff(root_problem, self.y_ests[0].clone(), CONV_TOL)
+            .expect("Couldn't converge to solution");
 
         println!("[THREAD {}] SURVIVED THE SCARY ROOT PROBLEM!", self.id);
 
         // re-evaluate the dynamics function
-        self.fxn_evals[0] = (self.dynamics)(self.times[0], &self.fxn_ests[0]);
+        self.fxn_evals[0] = (self.dynamics)(self.times[0], &self.y_ests[0]);
 
         println!("[THREAD {}] Re-evaluated the function", self.id);
 
         let data_new = IVPSolMsg::PROCESS(IVPSolData {
-            y_nxt: self.fxn_ests[0].clone(),
+            y_nxt: self.y_ests[0].clone(),
             dy_nxt: self.fxn_evals[0].clone(),
             t_nxt: self.times[0].clone(),
             weights: data.weights,
@@ -553,11 +558,22 @@ mod tests {
 
     #[test]
     fn test_ridc() {
-        let time_end = 1.0;
+        let time_end = 5.0;
         let dt = time_end + IT_2_D;
         let options = IntegOptionsParallel::default();
-        let ans = RK32.parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, options);
-        println!("EST | {:?}", ans.unwrap().states);
+        let ans = RK32
+            .parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, options)
+            .unwrap();
+        println!("EST | {:?}", ans.clone().states);
         println!("TRUE | {:?}", two_d_solution(time_end));
+        println!();
+        for i in 0..ans.times.len() {
+            println!(
+                "{} DIFF | T: {} | S: {:?}",
+                i,
+                ans.clone().times[i],
+                two_d_solution(ans.clone().times[i]) - ans.clone().states[i]
+            );
+        }
     }
 }

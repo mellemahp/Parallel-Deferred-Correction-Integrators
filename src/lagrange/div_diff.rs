@@ -179,7 +179,6 @@ mod tests {
         let old_diffs = divided_diff(&pts, &times);
         let nxt_time = 12.0;
         let nxt_point = Vector1::new(18.0);
-        println!("OLD | {:?}", old_diffs);
 
         let diff_true = vec![
             Vector1::new(18.0),
