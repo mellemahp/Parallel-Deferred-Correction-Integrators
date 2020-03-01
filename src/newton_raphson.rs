@@ -95,9 +95,7 @@ where
         }
         x_last = x_new.clone();
         fk = fxn(&x_new);
-        jac_inv = fdiff_jacobian(&fxn, &fk, &x_new)
-            .pseudo_inverse(INV_TOL)
-            .unwrap();
+        jac_inv = fdiff_jacobian(&fxn, &fk, &x_new).pseudo_inverse(INV_TOL)?;
     }
     return Err("Maximum Number of Iterations Reached");
 }
@@ -151,10 +149,6 @@ mod tests {
     use super::*;
     use na::{Matrix2, Vector1, Vector2};
 
-    // PROFILING
-    use std::time::Instant;
-    // END PROFILING
-
     #[test]
     fn test_jacobian() {
         let y = Vector2::new(1.0, 2.0);
@@ -174,16 +168,8 @@ mod tests {
         let i_guess = Vector1::new(1.0);
         let fxn = |x: &Vector1<f64>| Vector1::new(x[0].powf(3.0) + 3.0 * x[0] - 7.0);
 
-        // === PROFILING CODE
-        let now = Instant::now();
-        // === END PROFILING CODE
-
         let ans =
             newton_raphson_fdiff(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
-
-        // === PROFILING CODE
-        println!("FDIFF DURATION 1D: {:?}", now.elapsed().as_micros());
-        // === END PROFILING CODE
 
         // truth (from wolfram)
         let sol = 1.406287579960534691140831;
@@ -201,17 +187,9 @@ mod tests {
             )
         };
 
-        // === PROFILING CODE
-        let now = Instant::now();
-        // === END PROFILING CODE
-
         // value found using scipy.optimize.root
         let ans =
             newton_raphson_fdiff(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
-
-        // === PROFILING CODE
-        println!("FDIFF DURATION 1D: {:?}", now.elapsed().as_micros());
-        // === END PROFILING CODE
 
         let python_sol = Vector2::new(0.8411639, 0.1588361);
         const TOL: f64 = 1.0e-7_f64;
@@ -225,16 +203,8 @@ mod tests {
         let i_guess = Vector1::new(1.0);
         let fxn = |x: &Vector1<f64>| Vector1::new(x[0].powf(3.0) + 3.0 * x[0] - 7.0);
 
-        // === PROFILING CODE
-        let now = Instant::now();
-        // === END PROFILING CODE
-
         let ans = newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64)
             .expect("Couldn't converge to solution");
-
-        // === PROFILING CODE
-        println!("BROYDEN DURATION 1D: {:?}", now.elapsed().as_micros());
-        // === END PROFILING COD
 
         // truth (from wolfram)
         let sol = 1.406287579960534691140831;
@@ -252,17 +222,9 @@ mod tests {
             )
         };
 
-        // === PROFILING CODE
-        let now = Instant::now();
-        // === END PROFILING CODE
-
         // value found using scipy.optimize.root
-        let ans =
-            newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
-
-        // === PROFILING CODE
-        println!("Broyden DURATION 1D: {:?}", now.elapsed().as_micros());
-        // === END PROFILING CODE
+        let ans = newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64)
+            .expect("Couldn't converge to solution");
 
         let python_sol = Vector2::new(0.8411639, 0.1588361);
         const TOL: f64 = 1.0e-7_f64;

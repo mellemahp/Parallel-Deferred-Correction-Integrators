@@ -30,10 +30,6 @@ use std::sync::mpsc::{Receiver, Sender};
 
 // === End Imports ===
 
-// PROFILING
-use std::time::Instant;
-// END PROFILING
-
 pub struct Corrector<N: Dim + DimName + DimMin<N> + DimSub<U1>>
 where
     DefaultAllocator: Allocator<f64, N>
@@ -195,8 +191,7 @@ where
                 root_problem,
                 self.y_ests[l - i].clone(),
                 self.convergence_tol,
-            )
-            .unwrap();
+            )?;
 
             self.y_ests[l - i - 1] = root_sol;
             self.fxn_evals[l - i - 1] = (self.dynamics)(t_n, &self.y_ests[l - i - 1]);
@@ -239,9 +234,6 @@ where
 
         let dt = self.times[0] - self.times[1];
 
-        // === PROFILING CODE
-        let now = Instant::now();
-        // === END PROFILING CODE
         let root_problem = |y_n: &VectorN<f64, N>| {
             y_n - (&self.y_ests[1] + dt * (self.dynamics)(self.times[0], y_n)
                 - dt * &self.fxn_evals[0]
@@ -251,10 +243,6 @@ where
         self.y_ests[0] =
             newton_raphson_broyden(root_problem, self.y_ests[0].clone(), self.convergence_tol)
                 .expect("Couldn't converge to solution");
-
-        // === PROFILING CODE
-        println!("DURATION: {:?}", now.elapsed().as_micros());
-        // === END PROFILING COD
 
         // re-evaluate the dynamics function
         self.fxn_evals[0] = (self.dynamics)(self.times[0], &self.y_ests[0]);
