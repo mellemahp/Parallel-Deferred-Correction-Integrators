@@ -1,8 +1,12 @@
+/// Traits for the adams multi-step integrator
 ///
 ///
-///
-///
+
+// === Begin Imports ===
+// standard library imports
 use std::collections::VecDeque;
+
+// === End Imports ===
 
 pub trait AdamsPrimer {
     type OutVec;

@@ -2,6 +2,10 @@
 ///
 /// A multi-dimensional generalized newton-raphson root finder
 ///
+/// This method uses an initial guess for the
+///
+///
+
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;
@@ -9,6 +13,7 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, MatrixN, VectorN, U1};
 
 // === End Imports ===
+
 // Newton raphson method using Broydens method
 // see: https://en.wikipedia.org/wiki/Broyden%27s_method
 //

@@ -1,14 +1,24 @@
+/// Base of adams multi-step integrator
+///
+/// Most of this process is derived from the work laid out in
+/// "Computer Solutions to Differential Equations" in the chapter
+/// on "Efficient implementation of the Adams method"
+///
+// === Begin Imports ===
+// third party imports
 extern crate nalgebra as na;
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, VectorN};
 
+// local imports
 use super::primer::MultiStepPrimer;
-use crate::lagrange::div_diff::divided_diff;
-use std::collections::VecDeque;
-
 use super::traits::{
     AdamsCorrector, AdamsInit, AdamsPredictor, AdamsPrimer, AdamsStepper, AdamsUpdate,
 };
+use crate::lagrange::div_diff::divided_diff;
+use std::collections::VecDeque;
+
+// === End Imports ===
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AdamState {
@@ -21,20 +31,35 @@ pub struct AdamsData<N: Dim + DimName>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
+    // Order of polynomial fit to use for integration
     order: usize,
+    // Time deltas (t_n - t_i)
     dtks: VecDeque<f64>,
+    // Products of time deltas up to t_n
     psis_n: VecDeque<f64>,
+    // Products of time deltas up to t_{n+1}
     psis_np1: VecDeque<f64>,
+    // Beta coefficients for adams integrator
     betas: VecDeque<f64>,
+    //
     alphas: VecDeque<f64>,
+    // Divided differences
     phis: VecDeque<VectorN<f64, N>>,
+    // Recursively defined quadrature coefficients
     gs: VecDeque<f64>,
+    // Error divided difference
     phi_e: VecDeque<VectorN<f64, N>>,
+    // Intermediate divided diffs
     phi_stars: VecDeque<VectorN<f64, N>>,
+    // Dynamics function to integrate
     fxn: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
+    // Times of polynomial fit
     times: VecDeque<f64>,
+    // Evaluations of the dynamics function at the times above
     dyn_evals: VecDeque<VectorN<f64, N>>,
+    // current state estimate
     state: VectorN<f64, N>,
+    // Initial state
     init: AdamState,
 }
 impl<N: Dim + DimName> AdamsData<N>
@@ -133,6 +158,7 @@ where
         self.init = AdamState::Initialized;
     }
 }
+
 impl<N: Dim + DimName> AdamsPredictor for AdamsData<N>
 where
     DefaultAllocator: Allocator<f64, N>,
@@ -173,6 +199,7 @@ where
         &self.state + step * sum
     }
 }
+
 impl<N: Dim + DimName> AdamsCorrector for AdamsData<N>
 where
     DefaultAllocator: Allocator<f64, N>,

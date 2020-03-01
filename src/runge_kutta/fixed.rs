@@ -1,7 +1,13 @@
+/// Fixed step Runge Kutta Steppers
+///
+// === Begin Imports ===
+// third party imports
 extern crate nalgebra as na;
 use super::common::{IntegOptions, IntegResult, StepSimple};
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, VectorN};
+
+// === End Imports ===
 
 pub trait FixedStep: StepSimple {
     // Note: Step should be strictly positive. If it is negative

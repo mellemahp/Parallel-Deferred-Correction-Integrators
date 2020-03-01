@@ -22,9 +22,14 @@
 /// (4) Diagonally-implicit method: a_ii = const for i = 1, 2, ... , s
 ///
 /// NOTE: This library does not currently support Diagonally-implicit methods
+
+// === Begin Imports ===
+// third party imports
 extern crate nalgebra as na;
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, MatrixMN, VectorN};
+
+// === End Imports ===
 
 // Types of Runge-Kutta at tableau could define
 #[derive(Debug, Clone, PartialEq)]
@@ -39,8 +44,11 @@ pub struct Tableau<D: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
 {
+    // A coefficients
     pub a_vals: MatrixMN<f64, D, D>,
+    // C coefficients for time step variation
     pub c_vals: VectorN<f64, D>,
+    // B coefficients for final slope averaging
     pub b_vals: VectorN<f64, D>,
 }
 
@@ -75,9 +83,13 @@ pub struct EmbeddedTableau<D: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
 {
+    // A coefficients
     pub a_vals: MatrixMN<f64, D, D>,
+    // C coefficients for time step variation
     pub c_vals: VectorN<f64, D>,
+    // B coefficients for lower order slope averaging
     pub b_vals: VectorN<f64, D>,
+    // B coefficients for higher order slope averaging
     pub b_hat_vals: VectorN<f64, D>,
 }
 

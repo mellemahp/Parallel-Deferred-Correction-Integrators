@@ -14,6 +14,7 @@
 /// The Embedded rk formula was checked against the paper:
 ///  "Embedded Runge-Kutta formulae with stable Equilibrium states"
 ///  by Higham and Hall
+///
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;
@@ -24,6 +25,7 @@ use na::{DefaultAllocator, Dim, DimName, VectorN};
 use super::adaptive::AdaptiveStep;
 use super::common::{RkOrder, StepResult, StepWithError};
 use super::tableaus::{EmbeddedTableau, RkType};
+
 // === End Imports ===
 
 // Main Structure for embedded runge kutta fehlberg stepper
@@ -32,9 +34,13 @@ pub struct EmbeddedRKStepper<D: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
 {
+    // Name of integrator (usually based on butcher table choice)
     name: &'static str,
+    // Butcher tableau for the RK method.
     tableau: EmbeddedTableau<D>,
+    // Number of Stages in the Integrator
     stages: usize,
+    // Type of RK integrator i.e. Implicit, Explicit
     rktype: RkType,
 }
 

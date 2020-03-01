@@ -9,6 +9,7 @@ pub mod common;
 pub mod embedded;
 pub mod fixed;
 pub mod tableaus;
+
 // === PRE-BUILT: Simple ===
 // Note: only explicit integrators are provided
 //  at the current time

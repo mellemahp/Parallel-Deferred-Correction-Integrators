@@ -13,10 +13,11 @@
 extern crate lazy_static;
 
 pub mod adams;
-//pub mod euler;
+pub mod euler;
 pub mod lagrange;
 pub mod newton_raphson;
 pub mod ridc;
 pub mod runge_kutta;
 pub mod test_fxns;
+
 //pub mod comp_fxns;

@@ -8,6 +8,12 @@
 ///     # This creates an RK-# Integrator config. If you now want to use that integrator in a specific problem
 ///     integrator: RKInteg = config.initialize(.. intial_conditions)
 ///     let y = integrator.step(t, h);
+///
+/// Basic step for all runge-kutta follows the following equation
+///     y_{n+1} = y_n * h * Sum_{i=1}^s b_i k_i
+/// where
+///     k_i = f(x_n + c_i * h, y_n + h * Sum_{j=1}^s a_{ij} k_j)
+///
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;
@@ -26,9 +32,13 @@ pub struct RKStepper<D: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
 {
+    // Name of integrator (usually based on butcher table choice)
     name: &'static str,
+    // Butcher tableau for the RK method.
     tableau: Tableau<D>,
+    // Number of Stages in the Integrator
     stages: usize,
+    // Type of RK integrator i.e. Implicit, Explicit
     rktype: RkType,
 }
 
@@ -51,11 +61,7 @@ where
         }
     }
 }
-/// Basic step for all runge-kutta follows the following equation
-///     y_{n+1} = y_n * h * Sum_{i=1}^s b_i k_i
-/// where
-///     k_i = f(x_n + c_i * h, y_n + h * Sum_{j=1}^s a_{ij} k_j)
-///
+
 impl<D: DimName + Dim> StepSimple for RKStepper<D>
 where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
@@ -103,6 +109,7 @@ impl<D: DimName + Dim> FixedStep for RKStepper<D> where
     DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>
 {
 }
+
 // Tests
 #[cfg(test)]
 mod tests {

@@ -14,8 +14,11 @@ pub struct IntegResult<N: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
+    // List of times of solutions
     pub times: Vec<f64>,
+    // List of solutions associated with times
     pub states: Vec<VectorN<f64, N>>,
+    // Current time of integrator
     pub t: f64,
 }
 
@@ -59,8 +62,11 @@ pub struct StepResult<N: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
+    // Error norm of current step
     pub error: f64,
+    // Solution estimate
     pub value: VectorN<f64, N>,
+    // Derivative evaluation
     pub dyn_eval: VectorN<f64, N>,
 }
 
@@ -82,11 +88,14 @@ pub trait RkOrder {
     fn order(&self) -> usize;
 }
 
+// Tolerance object for RIDC integrator
 pub struct Tolerances<N: Dim + DimName>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
+    // Absolute tolerance
     pub abs: Option<VectorN<f64, N>>,
+    // Relative tolerance
     pub rel: Option<f64>,
 }
 
@@ -96,8 +105,11 @@ pub struct IntegOptions<N: DimName + Dim>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
+    // Absolute tolerance
     pub atol: Option<VectorN<f64, N>>,
+    // Relative Tolerance
     pub rtol: Option<f64>,
+    // Minimum step. Errors if step goes below this threshold
     pub min_step: Option<f64>,
 }
 impl<N: DimName + Dim> IntegOptions<N>

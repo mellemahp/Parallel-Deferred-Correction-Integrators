@@ -1,13 +1,27 @@
+/// Primer for adams multi-step integrator
+///
+/// A primer provides the initial steps necessary to initialize an 
+/// adams multi-step integrator. The number of points necessary to initialize
+/// the integrator is determined by the order of the multi-step polynomial fit
+/// used in the adams integrator to prime
+///
+
+// === Begin Imports ===
+// third party imports
 extern crate nalgebra as na;
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, VectorN};
 
+// local imports
 use crate::runge_kutta::adaptive::{AdaptiveStep, StepValid};
 use crate::runge_kutta::common::StepWithError;
 use crate::runge_kutta::common::{StepResult, Tolerances};
 use crate::runge_kutta::rk_embed::RK32;
 
 use super::traits::AdamsPrimer;
+
+// === Begin Imports ===
+
 
 #[derive(Clone)]
 pub struct MultiStepPrimer<N: Dim + DimName>
