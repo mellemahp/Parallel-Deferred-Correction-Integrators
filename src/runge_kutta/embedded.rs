@@ -114,6 +114,7 @@ where
                 )
                 .norm();
                 StepResult {
+                    dyn_eval: fxn(t_0 + step, &y_hat_n),
                     value: y_hat_n,
                     error,
                 }

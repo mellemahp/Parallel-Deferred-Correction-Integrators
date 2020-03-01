@@ -61,6 +61,7 @@ where
 {
     pub error: f64,
     pub value: VectorN<f64, N>,
+    pub dyn_eval: VectorN<f64, N>,
 }
 
 pub trait StepWithError {

@@ -9,6 +9,57 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, MatrixN, VectorN, U1};
 
 // === End Imports ===
+// Newton raphson method using Broydens method
+// see: https://en.wikipedia.org/wiki/Broyden%27s_method
+//
+pub fn newton_raphson_broyden<F, N: Dim + DimName + DimMin<N> + DimSub<U1>>(
+    fxn: F,
+    x_0: VectorN<f64, N>,
+    acc: f64,
+) -> Result<VectorN<f64, N>, &'static str>
+where
+    F: Fn(&VectorN<f64, N>) -> VectorN<f64, N>,
+    DefaultAllocator: Allocator<f64, N>
+        + Allocator<f64, U1, N>
+        + Allocator<f64, N, N>
+        + Allocator<f64, <N as DimMin<N>>::Output, N>
+        + Allocator<f64, <N as DimMin<N>>::Output>
+        + Allocator<f64, N, <N as DimMin<N>>::Output>
+        + Allocator<f64, <<N as DimMin<N>>::Output as DimSub<U1>>::Output>,
+    <N as DimMin<N>>::Output: DimName,
+    <N as DimMin<N>>::Output: DimSub<U1>,
+{
+    const MAX_ITER: i32 = 100;
+    const INV_TOL: f64 = 1.0_e-10_f64;
+
+    // pre-initialize variables
+    let mut f_n = fxn(&x_0);
+    let mut x_last = x_0.clone();
+    let mut jac: MatrixN<f64, N> = fdiff_jacobian(&fxn, &f_n, &x_0);
+
+    // empty allocations
+    let mut x_new: VectorN<f64, N>;
+    let mut f_last: VectorN<f64, N>;
+    let mut del_x: VectorN<f64, N>;
+    let mut del_x_norm: f64;
+    let mut del_f: VectorN<f64, N>;
+
+    // Iterate to victory!
+    for _ in 0..MAX_ITER {
+        x_new = &x_last - jac.clone().pseudo_inverse(INV_TOL)? * &f_n;
+        del_x = &x_new - &x_last;
+        del_x_norm = del_x.norm();
+        if del_x_norm < acc {
+            return Ok(x_new);
+        }
+        x_last = x_new.clone();
+        f_last = f_n;
+        f_n = fxn(&x_new);
+        del_f = &f_n - &f_last;
+        jac = &jac + 1.0 / del_x_norm.powf(2.0) * (&del_f - &jac * &del_x) * &del_x.transpose();
+    }
+    return Err("Maximum Number of Iterations Reached");
+}
 
 // Basic newton-raphson method using finite differencing
 pub fn newton_raphson_fdiff<F, N: Dim + DimName + DimMin<N> + DimSub<U1>>(
@@ -28,13 +79,11 @@ where
     <N as DimMin<N>>::Output: DimSub<U1>,
 {
     const MAX_ITER: i32 = 100;
-    const INV_TOL: f64 = 1.0_e-8_f64;
+    const INV_TOL: f64 = 1.0_e-10_f64;
 
     // pre-initialize variables
     let mut fk = fxn(&x_0);
-    let mut jac_inv: MatrixN<f64, N> = fdiff_jacobian(&fxn, &fk, &x_0)
-        .pseudo_inverse(INV_TOL)
-        .unwrap();
+    let mut jac_inv: MatrixN<f64, N> = fdiff_jacobian(&fxn, &fk, &x_0).pseudo_inverse(INV_TOL)?;
     let mut x_new: VectorN<f64, N>;
     let mut x_last = x_0.clone();
 
@@ -67,9 +116,9 @@ where
     DefaultAllocator: Allocator<f64, N> + Allocator<f64, N, N>,
 {
     // Approximately sqrt of ULP precision
-    const H_FACTOR: f64 = 1.0e-7_f64;
+    const H_FACTOR: f64 = 2.0e-7_f64;
     // Used to check if X is near zero
-    const Z_TOL: f64 = 1.0e-10;
+    const Z_TOL: f64 = 1.0e-12;
     // Alternative step if X is near zero
     const Z_FACTOR: f64 = 1.0e-14;
 
@@ -102,6 +151,10 @@ mod tests {
     use super::*;
     use na::{Matrix2, Vector1, Vector2};
 
+    // PROFILING
+    use std::time::Instant;
+    // END PROFILING
+
     #[test]
     fn test_jacobian() {
         let y = Vector2::new(1.0, 2.0);
@@ -120,8 +173,17 @@ mod tests {
     fn test_newton_1d() {
         let i_guess = Vector1::new(1.0);
         let fxn = |x: &Vector1<f64>| Vector1::new(x[0].powf(3.0) + 3.0 * x[0] - 7.0);
+
+        // === PROFILING CODE
+        let now = Instant::now();
+        // === END PROFILING CODE
+
         let ans =
             newton_raphson_fdiff(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
+
+        // === PROFILING CODE
+        println!("FDIFF DURATION 1D: {:?}", now.elapsed().as_micros());
+        // === END PROFILING CODE
 
         // truth (from wolfram)
         let sol = 1.406287579960534691140831;
@@ -139,9 +201,68 @@ mod tests {
             )
         };
 
+        // === PROFILING CODE
+        let now = Instant::now();
+        // === END PROFILING CODE
+
         // value found using scipy.optimize.root
         let ans =
             newton_raphson_fdiff(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
+
+        // === PROFILING CODE
+        println!("FDIFF DURATION 1D: {:?}", now.elapsed().as_micros());
+        // === END PROFILING CODE
+
+        let python_sol = Vector2::new(0.8411639, 0.1588361);
+        const TOL: f64 = 1.0e-7_f64;
+        for idx in 0..2 {
+            assert!((ans[idx] - python_sol[idx]).abs() < TOL);
+        }
+    }
+
+    #[test]
+    fn test_broyden_1d() {
+        let i_guess = Vector1::new(1.0);
+        let fxn = |x: &Vector1<f64>| Vector1::new(x[0].powf(3.0) + 3.0 * x[0] - 7.0);
+
+        // === PROFILING CODE
+        let now = Instant::now();
+        // === END PROFILING CODE
+
+        let ans = newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64)
+            .expect("Couldn't converge to solution");
+
+        // === PROFILING CODE
+        println!("BROYDEN DURATION 1D: {:?}", now.elapsed().as_micros());
+        // === END PROFILING COD
+
+        // truth (from wolfram)
+        let sol = 1.406287579960534691140831;
+        const TOL: f64 = 1.0e-6_f64;
+        assert!((ans[0] - sol).abs() < TOL);
+    }
+
+    #[test]
+    fn test_broyden_2d() {
+        let i_guess = Vector2::new(0.0, 0.0);
+        let fxn = |x: &Vector2<f64>| {
+            Vector2::new(
+                x[0] + 0.5 * (x[0] - x[1]).powf(3.0) - 1.0,
+                0.5 * (x[1] - x[0]).powf(3.0) + x[1],
+            )
+        };
+
+        // === PROFILING CODE
+        let now = Instant::now();
+        // === END PROFILING CODE
+
+        // value found using scipy.optimize.root
+        let ans =
+            newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
+
+        // === PROFILING CODE
+        println!("Broyden DURATION 1D: {:?}", now.elapsed().as_micros());
+        // === END PROFILING CODE
 
         let python_sol = Vector2::new(0.8411639, 0.1588361);
         const TOL: f64 = 1.0e-7_f64;
