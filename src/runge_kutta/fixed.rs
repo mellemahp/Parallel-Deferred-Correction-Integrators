@@ -63,7 +63,6 @@ mod tests {
         Vector1::new(5.0 * x - 3.0 * y[0])
     }
 
-    #[test]
     fn test_fixed_integ_rk3() {
         let ans = RK2.integrate(
             test_dyn,

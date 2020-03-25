@@ -6,7 +6,6 @@
 /// 2 - D:
 /// 3 - D: Keplerian 2 Body orbit and propagator
 ///
-
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;
@@ -69,6 +68,9 @@ lazy_static! {
     pub static ref ONE_D_INIT_VAL: Vector1<f64> = Vector1::new(-4.0);
 }
 pub fn one_d_dynamics(t: f64, y: &Vector1<f64>) -> Vector1<f64> {
+    // Added For "WEIGHT"
+    sleep(Duration::from_millis(5));
+    // END WEIGHTING
     (Vector1::new(3.0) - 4.0 * y) / (2.0 * t)
 }
 
@@ -86,7 +88,13 @@ lazy_static! {
     pub static ref IV_2_D: Vector2<f64> = Vector2::new(1.0, 4.0);
 }
 
+use std::thread::sleep;
+use std::time::Duration;
+
 pub fn two_d_dynamics(t: f64, y: &Vector2<f64>) -> Vector2<f64> {
+    // Added For "WEIGHT"
+    sleep(Duration::from_millis(1));
+    // END WEIGHTING
     Vector2::new(y[1], 2.0 - 6.0 * t)
 }
 
@@ -105,9 +113,9 @@ pub const MU: f64 = 398600.4418; // km^3s
 /// i.e. Given current state X, fn(X) -> \dot{X}
 /// Note: MU is hard coded here
 /// Note: All state values are in km or km/sec
-pub fn two_body_dyn(_time: f64, state: Vector6<f64>) -> Vector6<f64> {
+pub fn two_body_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
     let r3_inv = 1.0
-        / (state[0].powf(2.0) + state[0].powf(2.0) + state[0].powf(2.0))
+        / (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
             .sqrt()
             .powf(3.0);
     Vector6::new(
@@ -135,6 +143,30 @@ pub struct KeplerianState {
     pub time: f64,
 }
 impl KeplerianState {
+    pub fn from_peri_rad(
+        peri_rad: f64,
+        ecc: f64,
+        incl: f64,
+        raan: f64,
+        arg_peri: f64,
+        time: f64,
+    ) -> Self {
+        let a = peri_rad / (1.0 - ecc);
+        let h = (a * MU * (1.0 - ecc.powf(2.0))).sqrt();
+
+        KeplerianState {
+            radius: peri_rad,
+            a,
+            h,
+            incl,
+            raan: Some(raan),
+            ecc,
+            arg_peri: Some(arg_peri),
+            true_anom: 0.0,
+            time,
+        }
+    }
+
     // This cartesian state conversion follows the proceedure
     // laid out in Curtis "Orbital Mechanics for engineering students"
     //
@@ -226,7 +258,7 @@ impl KeplerianState {
                     * (1.0 - self.ecc.powf(2.0)).powf(3.0 / 2.0)
                     * new_time;
                 let root_problem = |e: f64| e - self.ecc * e.sin() - new_mean_anom;
-                let e_new = newton_raphson_fdiff(root_problem, new_mean_anom, 1e-13).unwrap();
+                let e_new = newton_raphson_fdiff(root_problem, new_mean_anom, 1e-12_f64).unwrap();
                 let ta_new = ((e_new.cos() - self.ecc) / (1.0 - self.ecc * e_new.cos())).acos();
                 let r_new = self.h.powf(2.0) / MU * 1.0 / (1.0 + self.ecc * ta_new.cos());
 
@@ -269,7 +301,7 @@ mod tests {
     #[test]
     fn test_2body_dynamics() {
         let state_1 = Vector6::new(1000.0, 1000.0, 1000.0, 1.0, 1.0, 1.0);
-        let deriv = two_body_dyn(1.0, state_1);
+        let deriv = two_body_dyn(1.0, &state_1);
         let true_deriv = Vector6::new(
             1.0,
             1.0,
@@ -314,7 +346,7 @@ mod tests {
         let curtis_state = KeplerianState {
             radius: 7414.0,
             h: 58310.0,
-            incl: 2.6738, // curtis lists this in degres, but radians are used here
+            incl: 2.6738, // curtis lists this in degrees, but radians are used here
             raan: Some(4.4558),
             ecc: 0.1712,
             arg_peri: Some(0.3503),
@@ -329,8 +361,6 @@ mod tests {
         assert!((kep_state.ecc - curtis_state.ecc).abs() < small_tols);
         assert!((kep_state.arg_peri.unwrap() - curtis_state.arg_peri.unwrap()).abs() < small_tols);
         assert!((kep_state.true_anom - curtis_state.true_anom).abs() < small_tols);
-
-        println!("{:?}", kep_state);
     }
 
     #[test]

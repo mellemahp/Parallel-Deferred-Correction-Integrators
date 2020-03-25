@@ -5,7 +5,6 @@
 /// This method uses an initial guess for the
 ///
 ///
-
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;

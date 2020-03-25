@@ -83,8 +83,12 @@ mod tests {
     use super::*;
     use crate::runge_kutta::common::IntegOptions;
     use crate::runge_kutta::embedded::EmbeddedRKStepper;
+    use crate::runge_kutta::rk_embed::DOPRI78;
     use crate::runge_kutta::tableaus::EmbeddedTableau;
     use nalgebra::{Matrix4, Vector1, Vector4};
+
+    use crate::test_fxns::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
+    use na::Vector2;
 
     fn test_dyn(t: f64, y: &Vector1<f64>) -> Vector1<f64> {
         Vector1::new(5.0 * t - 3.0 * y[0])
@@ -93,7 +97,6 @@ mod tests {
     #[test]
     // Tests the bogacki-shampine method against the Python implementation provided
     // in scipy
-    // TODO: Is this a good test? What is a good test?
     fn rk23_test() {
         let rk32 = EmbeddedRKStepper::new(
             "Bogacki-Shampine 3(2)",
@@ -139,5 +142,21 @@ mod tests {
         println!("DIFF: {:?}", (python_y - ans.last_y()[0]).abs());
         const TOL_VAL: f64 = 1e-3;
         assert!((python_y - ans.last_y()[0]).abs() < TOL_VAL);
+    }
+
+    #[test]
+    fn test_DOPRI78_2d() {
+        let time_end = 1.0;
+        let dt = time_end - IT_2_D;
+        let options = IntegOptions::default();
+        println!("STARTING 8th order integ");
+        let ans = DOPRI78
+            .integrate(two_d_dynamics, IT_2_D, *IV_2_D, dt, options)
+            .unwrap();
+
+        let tol_val = Vector2::repeat(1e-6);
+        let diff = (two_d_solution(time_end) - ans.last_y()).abs();
+        println!("{:?}", diff);
+        assert!(diff < tol_val);
     }
 }

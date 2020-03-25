@@ -221,7 +221,6 @@ impl<N: Dim + DimName> AdamsUpdate for AdamsData<N>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
-    // TODO: FIX
     fn update_phis(&mut self) {
         // clear out space for the new phi in the buffer. This prevents re-allocation of the ring buffer
         self.phis.pop_back();
