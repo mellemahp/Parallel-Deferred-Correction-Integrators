@@ -107,7 +107,7 @@ pub fn two_d_solution(t: f64) -> Vector2<f64> {
 ///=== Two body Problem ===
 /// Uses a simple keplerian, 2-body orbit
 
-pub const MU: f64 = 398600.4418; // km^3s
+pub const MU_EARTH: f64 = 398600.4418; // km^3s
 
 /// Dynamics function for Earth 2-Body system
 /// i.e. Given current state X, fn(X) -> \dot{X}
@@ -122,9 +122,9 @@ pub fn two_body_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
         state[3],
         state[4],
         state[5],
-        -MU * state[0] * &r3_inv,
-        -MU * state[1] * &r3_inv,
-        -MU * state[2] * &r3_inv,
+        -MU_EARTH * state[0] * &r3_inv,
+        -MU_EARTH * state[1] * &r3_inv,
+        -MU_EARTH * state[2] * &r3_inv,
     )
 }
 
@@ -141,6 +141,7 @@ pub struct KeplerianState {
     pub arg_peri: Option<f64>,
     pub true_anom: f64,
     pub time: f64,
+    pub mu: f64,
 }
 impl KeplerianState {
     pub fn from_peri_rad(
@@ -150,9 +151,11 @@ impl KeplerianState {
         raan: f64,
         arg_peri: f64,
         time: f64,
+        mu: Option<f64>,
     ) -> Self {
+        let mu = mu.unwrap_or(MU_EARTH);
         let a = peri_rad / (1.0 - ecc);
-        let h = (a * MU * (1.0 - ecc.powf(2.0))).sqrt();
+        let h = (a * mu * (1.0 - ecc.powf(2.0))).sqrt();
 
         KeplerianState {
             radius: peri_rad,
@@ -164,13 +167,15 @@ impl KeplerianState {
             arg_peri: Some(arg_peri),
             true_anom: 0.0,
             time,
+            mu,
         }
     }
 
     // This cartesian state conversion follows the proceedure
     // laid out in Curtis "Orbital Mechanics for engineering students"
     //
-    pub fn from_cartesian_state(time: f64, cart_state: Vector6<f64>) -> Self {
+    pub fn from_cartesian_state(time: f64, cart_state: Vector6<f64>, mu: Option<f64>) -> Self {
+        let mu = mu.unwrap_or(MU_EARTH);
         let radius = Vector3::<f64>::new(cart_state[0], cart_state[1], cart_state[2]);
         let velocity = Vector3::<f64>::new(cart_state[3], cart_state[4], cart_state[5]);
         let v_radial = radius.dot(&velocity) / radius.norm();
@@ -198,8 +203,8 @@ impl KeplerianState {
         }
 
         // calculate eccentricity
-        let ecc_vec = 1.0 / MU
-            * ((velocity.norm().powf(2.0) - MU / radius.norm()) * radius
+        let ecc_vec = 1.0 / mu
+            * ((velocity.norm().powf(2.0) - mu / radius.norm()) * radius
                 - (v_radial * radius.norm()) * velocity);
         let ecc = ecc_vec.norm();
 
@@ -223,7 +228,7 @@ impl KeplerianState {
         }
 
         // calculate SMA
-        let a = h.powf(2.0) / (MU * (1.0 - ecc.powf(2.0)));
+        let a = h.powf(2.0) / (mu * (1.0 - ecc.powf(2.0)));
 
         KeplerianState {
             radius: radius.norm(),
@@ -235,6 +240,7 @@ impl KeplerianState {
             arg_peri,
             true_anom,
             time,
+            mu,
         }
     }
 
@@ -246,7 +252,7 @@ impl KeplerianState {
     pub fn propagate_to_time(&self, new_time: f64) -> Self {
         match self.ecc {
             ecc if ecc == 0.0 => {
-                let true_anom = new_time * MU.sqrt() / self.radius.powf(3.0 / 2.0);
+                let true_anom = new_time * self.mu.sqrt() / self.radius.powf(3.0 / 2.0);
                 KeplerianState {
                     true_anom,
                     time: new_time,
@@ -254,13 +260,13 @@ impl KeplerianState {
                 }
             }
             _ => {
-                let new_mean_anom = MU.powf(2.0) / self.h.powf(3.0)
+                let new_mean_anom = self.mu.powf(2.0) / self.h.powf(3.0)
                     * (1.0 - self.ecc.powf(2.0)).powf(3.0 / 2.0)
                     * new_time;
                 let root_problem = |e: f64| e - self.ecc * e.sin() - new_mean_anom;
                 let e_new = newton_raphson_fdiff(root_problem, new_mean_anom, 1e-12_f64).unwrap();
                 let ta_new = ((e_new.cos() - self.ecc) / (1.0 - self.ecc * e_new.cos())).acos();
-                let r_new = self.h.powf(2.0) / MU * 1.0 / (1.0 + self.ecc * ta_new.cos());
+                let r_new = self.h.powf(2.0) / self.mu * 1.0 / (1.0 + self.ecc * ta_new.cos());
 
                 KeplerianState {
                     radius: r_new,
@@ -290,6 +296,191 @@ impl KeplerianState {
 
         Vector6::new(x, y, z, dx, dy, dz)
     }
+}
+
+///=== Circularly Restricted 3 body Problem ===
+pub const MU_CR3BP: f64 = 0.0121505; // km^3s
+
+/// Dynamics function for Earth-Moon 3-Body system
+/// i.e. Given current state X, fn(X) -> \dot{X}
+/// Note: MU is hard coded here
+/// Note: All state values are in non-dimensionalized units
+pub fn cr3bp_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    // computes inverse cubed of r1 and r2
+    let r13_inv = 1.0
+        / ((state[0] + MU_CR3BP).powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
+            .sqrt()
+            .powf(3.0);
+    let r23_inv = 1.0
+        / ((state[0] - (1.0 - MU_CR3BP).powf(2.0)) + state[1].powf(2.0) + state[2].powf(2.0))
+            .sqrt()
+            .powf(3.0);
+
+    Vector6::new(
+        state[3],
+        state[4],
+        state[5],
+        state[0] + 2.0 * state[4]
+            - (1.0 - MU_CR3BP) * (state[0] + MU_CR3BP) * &r13_inv
+            - MU_CR3BP * (state[0] - (1.0 - MU_CR3BP)) * &r23_inv,
+        state[1]
+            - 2.0 * state[3]
+            - (1.0 - MU_CR3BP) * state[1] * &r13_inv
+            - MU_CR3BP * state[1] * &r23_inv,
+        -(1.0 - MU_CR3BP) * state[2] * &r13_inv - MU_CR3BP * state[2] * &r23_inv,
+    )
+}
+
+///=== Perturbations ===
+//
+// The following perturbations are provided for testing:
+// - Drag (exponential model)
+// - J2
+// - J3
+// - Moon point mass (mean elements)
+// - Sun point mass (circular earth orbit)
+// NOTE: Sun and moon point mass are only for testing and are
+// not physically accurate models. Ephemerides should be used for
+// practical applications
+//
+// == constants ==
+// gravity perturbations
+pub const J2: f64 = 1.082626925638815e-03; // j2 gravity field coefficient, normalized
+pub const J3: f64 = -0.0000025323; // j3 gravity field coefficient, normalized
+
+// drag model
+pub const R_E: f64 = 6378.1363; // radius of the earth (km)
+pub const H_0: f64 = 88667.0; // reference height (m)
+pub const R_0: f64 = 700000.0 + R_E * 1000.0; // reference radius (m)
+pub const RHO_0: f64 = 0.0003614; // kg / km^3
+pub const C_D: f64 = 2.0; // unitless
+pub const A_SAT: f64 = 3.0e-6; // cross sectional area of satellite (km^2)
+pub const MASS: f64 = 970.0; // kg
+
+// == Drag perturbations ==
+pub fn drag_pert(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let r = (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0)).sqrt() * 1000.0; // converts to m
+    let rho = RHO_0 * (-(r - R_0) / H_0).exp(); // non-dimensional so we do not need to convert back to km
+    let f_drag_mag = -1.0 / 2.0
+        * rho
+        * (C_D * A_SAT / MASS)
+        * (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0)).sqrt();
+    Vector6::new(
+        0.0,
+        0.0,
+        0.0,
+        f_drag_mag * state[3],
+        f_drag_mag * state[4],
+        f_drag_mag * state[5],
+    )
+}
+
+// == Non-spherical Gravity perturbations ==
+pub fn j2_pert(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let r = (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0)).sqrt();
+    let r_2_inv = 1.0 / r.powf(2.0);
+    let r_5_inv_scaled = 1.0 / (2.0 * r.powf(5.0));
+    let z2 = state[2].powf(2.0);
+    Vector6::new(
+        0.0,
+        0.0,
+        0.0,
+        -3.0 * J2 * state[0] * r_5_inv_scaled * (1.0 - 5.0 * z2 * r_2_inv),
+        -3.0 * J2 * state[1] * r_5_inv_scaled * (1.0 - 5.0 * z2 * r_2_inv),
+        -3.0 * J2 * state[2] * r_5_inv_scaled * (3.0 - 5.0 * z2 * r_2_inv),
+    )
+}
+
+pub fn j3_pert(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let r = (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0)).sqrt();
+    let re_3 = R_E.powf(3.0);
+    let r_7_inv_scaled = 1.0 / (2.0 * r.powf(7.0));
+    let r_2_inv = 1.0 / r.powf(2.0);
+    let z_2 = state[2].powf(2.0);
+    let z_3 = state[2] * z_2;
+    let z_4 = state[2] * z_3;
+
+    Vector6::new(
+        0.0,
+        0.0,
+        0.0,
+        -5.0 * J3
+            * MU_EARTH
+            * re_3
+            * state[0]
+            * r_7_inv_scaled
+            * (3.0 * state[2] - 7.0 * z_3 * r_2_inv),
+        -5.0 * J3
+            * MU_EARTH
+            * re_3
+            * state[1]
+            * r_7_inv_scaled
+            * (3.0 * state[2] - 7.0 * z_3 * r_2_inv),
+        -5.0 * J3
+            * MU_EARTH
+            * re_3
+            * state[2]
+            * r_7_inv_scaled
+            * (6.0 * z_2 - 7.0 * z_4 * r_2_inv - 3.0 / 5.0 * r.powf(2.0)),
+    )
+}
+
+// == Third Body perturbations ==
+pub const MU_MOON: f64 = 0.004903e6; // km^3/s^2
+lazy_static! {
+    pub static ref MOON_ORBIT: KeplerianState =
+        KeplerianState::from_peri_rad(383397.7725, 0.0, 0.4984066932, 0.0, 0.0, 0.0, None,);
+}
+
+pub fn moon_pert(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let new_moon_state_kep = MOON_ORBIT.propagate_to_time(time);
+    let new_moon_state_cart = new_moon_state_kep.into_cartesian();
+    let r_sat_moon = new_moon_state_cart - state;
+    let r3_inv = 1.0
+        / (r_sat_moon[0].powf(2.0) + r_sat_moon[1].powf(2.0) + r_sat_moon[2].powf(2.0))
+            .sqrt()
+            .powf(3.0);
+    Vector6::new(
+        0.0,
+        0.0,
+        0.0,
+        MU_MOON * r_sat_moon[0] * &r3_inv,
+        MU_MOON * r_sat_moon[1] * &r3_inv,
+        MU_MOON * r_sat_moon[2] * &r3_inv,
+    )
+}
+
+pub const MU_SUN: f64 = 132712e6; // km^3/s^2
+lazy_static! {
+    pub static ref EARTH_ORBIT: KeplerianState =
+        KeplerianState::from_peri_rad(149.60e6, 0.0, 0.401425728, 0.0, 0.0, 0.0, Some(MU_SUN));
+}
+
+pub fn sun_pert(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let new_earth_state_kep = EARTH_ORBIT.propagate_to_time(time);
+    let new_sun_state_cart = -1.0 * new_earth_state_kep.into_cartesian();
+    let r_sat_sun = new_sun_state_cart - state;
+    let r3_inv = 1.0
+        / (r_sat_sun[0].powf(2.0) + r_sat_sun[1].powf(2.0) + r_sat_sun[2].powf(2.0))
+            .sqrt()
+            .powf(3.0);
+    Vector6::new(
+        0.0,
+        0.0,
+        0.0,
+        MU_SUN * r_sat_sun[0] * &r3_inv,
+        MU_SUN * r_sat_sun[1] * &r3_inv,
+        MU_SUN * r_sat_sun[2] * &r3_inv,
+    )
+}
+
+pub fn full_perturbed_2body_dyn(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    two_body_dyn(time, state)
+        + drag_pert(time, state)
+        + j2_pert(time, state)
+        + j3_pert(time, state)
+        + moon_pert(time, state)
+        + sun_pert(time, state)
 }
 
 #[cfg(test)]
@@ -328,10 +519,15 @@ mod tests {
             true_anom: 0.0,
             time: 0.0,
             a: 9128.0,
+            mu: MU_EARTH,
         };
         let new_state_a = start_state.propagate_to_time(866.77);
         let curtis_true_anom_a = 1.00222042;
         const TOL: f64 = 1.0e-3;
+        println!(
+            "TRUE {:?} | EST {:?}",
+            curtis_true_anom_a, new_state_a.true_anom
+        );
         assert!((new_state_a.true_anom - curtis_true_anom_a).abs() < TOL);
     }
 
@@ -340,7 +536,7 @@ mod tests {
     #[test]
     fn test_cart_to_kep() {
         let state = Vector6::new(-6045.0, -3490.0, 2500.0, -3.457, 6.618, 2.533);
-        let kep_state = KeplerianState::from_cartesian_state(0.0, state);
+        let kep_state = KeplerianState::from_cartesian_state(0.0, state, None);
         let big_tols = 2.0; // the numbers in curtis are very aggressively rounded
         let small_tols = 0.001;
         let curtis_state = KeplerianState {
@@ -353,6 +549,7 @@ mod tests {
             true_anom: 0.49654617,
             time: 0.0,
             a: 0.0,
+            mu: MU_EARTH,
         };
         assert!((kep_state.radius - curtis_state.radius).abs() < big_tols);
         assert!((kep_state.h - curtis_state.h).abs() < big_tols);
@@ -367,7 +564,7 @@ mod tests {
     fn test_cartesian_conversion() {
         // test 1
         let state = Vector6::new(-6045.0, -3490.0, 2500.0, -3.457, 6.618, 2.533);
-        let kep_state = KeplerianState::from_cartesian_state(0.0, state);
+        let kep_state = KeplerianState::from_cartesian_state(0.0, state, None);
         let re_convert = kep_state.into_cartesian();
         let diffs = state - re_convert;
         const TOL: f64 = 1.0e-2;
@@ -377,7 +574,7 @@ mod tests {
 
         // test 2
         let state2 = Vector6::new(-7000.0, -7500.0, 6000.0, -3.457, 5.0, 2.533);
-        let kep_state2 = KeplerianState::from_cartesian_state(0.0, state2);
+        let kep_state2 = KeplerianState::from_cartesian_state(0.0, state2, None);
         let re_convert2 = kep_state2.into_cartesian();
         let diffs2 = state2 - re_convert2;
         for val in diffs2.iter() {

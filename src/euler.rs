@@ -52,7 +52,7 @@ where
 mod tests {
     use super::*;
     use crate::test_fxns::{one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL};
-    use itertools_num;
+    //use itertools_num;
 
     #[test]
     fn test_fwd_one_step() {

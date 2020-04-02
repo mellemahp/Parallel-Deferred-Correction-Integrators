@@ -136,6 +136,9 @@ where
                 Ok(msg) => match msg {
                     IVPSolMsg::PROCESS(data) => data,
                     IVPSolMsg::TERMINATE => {
+                        self.tx
+                            .send(IVPSolMsg::TERMINATE)
+                            .expect("Failure to send TERMINATE message to downstream threads");
                         break;
                     }
                 },

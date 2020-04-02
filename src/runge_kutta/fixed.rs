@@ -47,7 +47,7 @@ pub trait FixedStep: StepSimple {
                 step = t_end - results.t;
             }
             let res = self.step(fxn, results.t, results.last_y(), step);
-            results.add_val(step, res);
+            results.add_val(step, res.value);
         }
         Ok(results)
     }

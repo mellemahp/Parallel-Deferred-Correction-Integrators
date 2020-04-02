@@ -293,10 +293,10 @@ mod tests {
 
     #[test]
     fn test_gen() {
-        let m: usize = 5;
+        let m: usize = 4;
         let tol = Tolerances {
-            abs: Some(Vector2::new(1.0e-9, 1.0e-9)),
-            rel: Some(1.0e-6_f64),
+            abs: Some(Vector2::new(1.0e-6, 1.0e-6)),
+            rel: Some(1.0e-9_f64),
         };
         let max_step_0 = 0.4;
 

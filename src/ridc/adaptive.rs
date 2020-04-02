@@ -12,23 +12,28 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 
 // local imports
+use super::base::{RIDCIntegratorAdaptive, RIDCIntegratorBase};
 use super::common::{IVPSolData, IVPSolMsg, IntegOptionsParallel};
-use super::corrector::Corrector;
 use crate::lagrange::quadrature::{get_weights, get_x_pow, specific_weights};
 use crate::runge_kutta::adaptive::{AdaptiveStep, StepValid};
-use crate::runge_kutta::common::{IntegResult, StepResult};
+use crate::runge_kutta::common::{IntegResult, StepResult, StepWithError};
 use crate::runge_kutta::embedded::EmbeddedRKStepper;
 
 // Standard library imports
 use std::collections::VecDeque;
 use std::marker::Send;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
 
 // === End Imports ===
 
-pub trait RIDCAdaptiveInteg: AdaptiveStep {
+impl<D: DimName + Dim> RIDCIntegratorBase for EmbeddedRKStepper<D> where
+    DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>
+{
+}
+
+impl<D: DimName + Dim> RIDCIntegratorAdaptive for EmbeddedRKStepper<D>
+where
+    DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>,
+{
     fn parallel_integrator<N: Dim + DimName + DimMin<N> + DimSub<U1>>(
         &self,
         fxn: fn(f64, &VectorN<f64, N>) -> VectorN<f64, N>,
@@ -52,8 +57,8 @@ pub trait RIDCAdaptiveInteg: AdaptiveStep {
         // Unwrap Options to defaults
         let atol = integ_opts
             .atol
-            .unwrap_or(VectorN::<f64, N>::repeat(1e-6_f64));
-        let rtol = integ_opts.rtol.unwrap_or(1e-3_f64);
+            .unwrap_or(VectorN::<f64, N>::repeat(1e-5_f64));
+        let rtol = integ_opts.rtol.unwrap_or(1e-4_f64);
         let min_step_size = integ_opts.min_step.unwrap_or(1e-10_f64);
         let poly_order = integ_opts.poly_order.unwrap_or(3); // ONLY 3 is currently supported
         let corrector_order = integ_opts.corrector_order.unwrap_or(1);
@@ -68,45 +73,25 @@ pub trait RIDCAdaptiveInteg: AdaptiveStep {
         let mut step_revision: StepValid;
         let backward: bool = step < 0.0;
 
-        // Spawn all channels
-        let mut channels: Vec<(Sender<IVPSolMsg<N>>, Receiver<IVPSolMsg<N>>)> = Vec::new();
-        channels.push(mpsc::channel());
-        for _ in 0..corrector_order {
-            channels.push(mpsc::channel());
-        }
-
-        // root channels used by the predictor thread
-        let channels_root = channels.pop().unwrap();
-        let root_tx = channels_root.0;
-        let mut last_rx = channels_root.1;
-
-        // generate threads
-        let mut thread_handles: Vec<thread::JoinHandle<Result<(), &'static str>>> = Vec::new();
-        for i in 0..corrector_order {
-            let chan = channels.pop().unwrap();
-            let mut corrector = Corrector::new(
-                poly_order,
-                fxn,
-                &y_0,
-                &fxn(t_0, &y_0),
-                t_0,
-                last_rx,
-                chan.0,
-                i as u32,
-                corr_conv_tol,
-            );
-            last_rx = chan.1;
-            let handler = thread::Builder::new()
-                .name(format!("THREAD {}", i))
-                .spawn(move || corrector.run())
-                .unwrap();
-            thread_handles.push(handler);
-        }
-        let root_rx = last_rx;
-
         // initialize vals
         let mut y_last = y_0.clone();
+        let first_dyn_eval = &fxn(t_0, y_0);
         let mut counter = 1;
+
+        // spawn threads
+        let (root_tx, root_rx) = self.spawn_correctors(
+            corrector_order,
+            poly_order,
+            fxn,
+            t_0,
+            y_0,
+            first_dyn_eval,
+            corr_conv_tol,
+        );
+
+        // flag to prevent infinite looping while collecting results
+        let mut just_restarted = false;
+
         // Used to generate the weights for the quadrature. Quadrature uses a backwards
         // form of the lagrange polynomial interpolation
         let mut times_rev: VecDeque<f64> = VecDeque::from(vec![t_0]);
@@ -129,6 +114,7 @@ pub trait RIDCAdaptiveInteg: AdaptiveStep {
             match step_revision {
                 StepValid::Accept(nxt_step) => {
                     if counter < poly_order + 1 {
+                        just_restarted = false;
                         // Update all times
                         results.t += sub_step;
                         results.times.push(results.t);
@@ -147,47 +133,14 @@ pub trait RIDCAdaptiveInteg: AdaptiveStep {
                         y_last = step_res.value;
                         sub_step = nxt_step;
                         counter += 1;
-                    } else if counter % restart_length == 0 {
-                        results.t += sub_step;
-                        let x_pows = get_x_pow(
-                            results.times[results.times.len() - 1],
-                            results.t,
-                            poly_order,
-                        );
-                        results.times.push(results.t);
-
-                        // rotate times into times vector
-                        times_rev.pop_back().expect("Could not pop old time");
-                        times_rev.push_front(results.t);
-
-                        root_tx
-                            .send(IVPSolMsg::PROCESS(IVPSolData {
-                                y_nxt: step_res.value.clone(),
-                                dy_nxt: step_res.dyn_eval.clone(),
-                                t_nxt: results.t.clone(),
-                                weights: Some(specific_weights(x_pows, &get_weights(&times_rev))),
-                            }))
-                            .expect("Could not send Message from [ROOT]");
-                        sub_step = nxt_step;
-                        counter += 1;
-
-                        while results.states.len() < counter {
-                            match root_rx.recv() {
-                                Ok(msg) => match msg {
-                                    IVPSolMsg::PROCESS(data) => {
-                                        results.states.push(data.y_nxt);
-                                    }
-                                    IVPSolMsg::TERMINATE => {
-                                        return Err("Somehow the root thread recieved a terminate command. Cry yourself to sleep");
-                                    }
-                                },
-                                Err(_) => {
-                                    return Err("Something went terribly wrong");
-                                }
-                            };
-                        }
+                    } else if (counter % restart_length == 0) && !(just_restarted) {
+                        println!("GOT HERE!!!");
+                        // stop and wait for other threads to catch up
+                        self.collect_results(&root_rx, &mut results)?;
                         y_last = results.states[results.states.len() - 1].clone();
+                        just_restarted = true;
                     } else {
+                        just_restarted = false;
                         results.t += sub_step;
 
                         let x_pows = get_x_pow(
@@ -221,35 +174,10 @@ pub trait RIDCAdaptiveInteg: AdaptiveStep {
                 }
             }
         }
-        if results.times.len() != results.states.len() {
-            while results.times.len() != results.states.len() {
-                match root_rx.recv() {
-                    Ok(msg) => match msg {
-                        IVPSolMsg::PROCESS(data) => {
-                            results.states.push(data.y_nxt);
-                        }
-                        IVPSolMsg::TERMINATE => {
-                            return Err("Somehow the root thread recieved a terminate command. Cry yourself to sleep");
-                        }
-                    },
-                    Err(err) => {
-                        println!("{:?}", err);
-                        return Err("Something went terribly wrong");
-                    }
-                };
-            }
-        }
-        root_tx
-            .send(IVPSolMsg::TERMINATE)
-            .expect("Could not send poison pill msg from [ROOT]");
-
+        self.collect_results(&root_rx, &mut results)?;
+        self.poison(root_tx, root_rx)?;
         Ok(results)
     }
-}
-
-impl<D: DimName + Dim> RIDCAdaptiveInteg for EmbeddedRKStepper<D> where
-    DefaultAllocator: Allocator<f64, D> + Allocator<f64, D, D>
-{
 }
 
 // Tests
@@ -265,9 +193,9 @@ mod tests {
     use na::{Vector1, Vector2, Vector6};
     use std::time::Instant;
 
-    //#[test]
+    #[test]
     fn test_ridc_1d() {
-        let time_end = 5.0;
+        let time_end = 10.0;
         let dt = time_end - ONE_D_INIT_TIME;
         let options = IntegOptionsParallel::default();
         let ans = RK32
@@ -282,7 +210,7 @@ mod tests {
 
         let tol_val = Vector1::new(1e-3);
         let diff = (one_d_solution(time_end) - ans.last_y()).abs();
-        println!("{:?}", diff);
+        println!("DIFF 1d | {:?}", diff);
         assert!(diff < tol_val);
     }
 
@@ -296,6 +224,7 @@ mod tests {
             .unwrap();
         let tol_val = Vector2::repeat(1e-7);
         let diff = (two_d_solution(time_end) - ans.last_y()).abs();
+        println!("DIFF 2d | {:?}", diff);
         assert!(diff < tol_val);
     }
 
@@ -461,10 +390,10 @@ mod tests {
         }
     }
 
-    #[test]
+    //#[test]
     fn test_time_to_acc_kep_0001() {
         // INitial state
-        let kep_init = KeplerianState::from_peri_rad(8000.0, 0.001, 0.0, 0.0, 0.0, 0.0);
+        let kep_init = KeplerianState::from_peri_rad(8000.0, 0.001, 0.0, 0.0, 0.0, 0.0, None);
         let cart_init = kep_init.into_cartesian();
 
         // Initialize integrators
