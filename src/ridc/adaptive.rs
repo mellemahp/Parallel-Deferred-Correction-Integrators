@@ -186,10 +186,11 @@ mod tests {
     use super::*;
     use crate::runge_kutta::common::IntegOptions;
     use crate::runge_kutta::rk_embed::{RK32, RKF45};
-    use crate::test_fxns::{
-        one_d_dynamics, one_d_solution, two_body_dyn, two_d_dynamics, two_d_solution,
-        KeplerianState, IT_2_D, IV_2_D, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
+    use crate::test_fxns::kepler::{two_body_dyn, KeplerianState};
+    use crate::test_fxns::one_d::{
+        one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
     };
+    use crate::test_fxns::two_d::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
     use na::{Vector1, Vector2, Vector6};
     use std::time::Instant;
 

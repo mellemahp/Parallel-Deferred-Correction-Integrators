@@ -51,7 +51,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fxns::{one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL};
+    use crate::test_fxns::one_d::{
+        one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
+    };
     //use itertools_num;
 
     #[test]

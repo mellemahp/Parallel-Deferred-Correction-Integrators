@@ -1,156 +1,89 @@
-/// Test Functions (test_fxns)
+/// === Two body Problem ===
+/// Provides functions and methods for computing a simple keplerian, 2-body orbit
+/// Also provides a set of higher order perturbations that can be added to the basic
+/// two body problem  
 ///
-/// Defines the test cases for use throughout the library
-/// The basic test cases are as follows:
-/// 1 - D:
-/// 2 - D:
-/// 3 - D: Keplerian 2 Body orbit and propagator
+/// The following perturbations are provided for testing:
+/// - Drag (exponential model)
+/// - J2
+/// - J3
+/// - Moon point mass (mean elements)
+/// - Sun point mass (circular earth orbit)
+/// NOTE: Sun and moon point mass are only for testing and are
+/// not physically accurate models. Ephemerides should be used for
+/// practical applications
 ///
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;
-use na::{Vector1, Vector2, Vector3, Vector6};
+use na::{Vector3, Vector6};
 
 // standard library
 use std::f64::consts::PI;
 
+// local imports
+use super::utils::newton_raphson_fdiff;
+
 // === End Imports ===
 
-// Helper functions
-pub fn newton_raphson_fdiff<F>(funcd: F, y1: f64, yacc: f64) -> Result<f64, &'static str>
-where
-    F: Fn(f64) -> f64,
-{
-    const MAX_ITER: i32 = 100;
-
-    // pre-initialize variables
-    let mut fk = funcd(y1);
-    let mut fdk = fwd_diff(&funcd, fk, y1);
-    let mut y_new: f64;
-    let mut y_last = y1;
-
-    // Iterate to victory!
-    for _j in 0..MAX_ITER {
-        y_new = y_last - fk / fdk;
-        if (y_new - y_last).abs() < yacc {
-            return Ok(y_new);
-        }
-        y_last = y_new;
-        fk = funcd(y_new);
-        fdk = fwd_diff(&funcd, fk, y_new);
-    }
-    return Err("Maximum Number of Iterations Reached");
-}
-
-// Selection of h opt is taken from https://people.sc.fsu.edu/~pbeerli/classes/isc5315-notes/Harvey_Stein-4pages.pdf
-// Here they suggest using ~ 7e-6
-// Adding auto-diff will replace the need for a step size and should give even better
-// accuracy
-pub fn fwd_diff<F>(fxn: &F, f_y: f64, y: f64) -> f64
-where
-    F: Fn(f64) -> f64,
-{
-    const H_STEP: f64 = 7e-6;
-
-    (fxn(y + H_STEP) - f_y) / H_STEP
-}
-
-///=== 1-D Test Problem ===
-/// The one dimensional test problem
-///
-/// Taken from Example 6: Pauls Online notes differential eq.
-/// http://tutorial.math.lamar.edu/Classes/DE/Definitions.aspx
-/// Validated the example using python's solve_ivp()
-///
-pub const ONE_D_INIT_TIME: f64 = 1.0;
-
-lazy_static! {
-    pub static ref ONE_D_INIT_VAL: Vector1<f64> = Vector1::new(-4.0);
-}
-pub fn one_d_dynamics(t: f64, y: &Vector1<f64>) -> Vector1<f64> {
-    // Added For "WEIGHT"
-    sleep(Duration::from_millis(5));
-    // END WEIGHTING
-    (Vector1::new(3.0) - 4.0 * y) / (2.0 * t)
-}
-
-pub fn one_d_solution(t: f64) -> Vector1<f64> {
-    Vector1::new(3.0 / 4.0 - 19.0 / (4.0 * t.powf(2.0)))
-}
-
-///=== 2-D Test Problem ===
-/// We pull this example from example 4 of:
-/// https://resources.saylor.org/wwwresources/archived/site/wp-content/uploads/2012/09/MA102-5.5.4-Equations-and-Initial-Value-Problems.pdf
-///
-/// Once again the answer is also validated with python solve IVP
-pub const IT_2_D: f64 = 0.0;
-lazy_static! {
-    pub static ref IV_2_D: Vector2<f64> = Vector2::new(1.0, 4.0);
-}
-
-use std::thread::sleep;
-use std::time::Duration;
-
-pub fn two_d_dynamics(t: f64, y: &Vector2<f64>) -> Vector2<f64> {
-    // Added For "WEIGHT"
-    sleep(Duration::from_millis(1));
-    // END WEIGHTING
-    Vector2::new(y[1], 2.0 - 6.0 * t)
-}
-
-pub fn two_d_solution(t: f64) -> Vector2<f64> {
-    let y = t.powf(2.0) - t.powf(3.0) + 4.0 * t + 1.0;
-    let dy = 2.0 * t - 3.0 * t.powf(2.0) + 4.0;
-    Vector2::new(y, dy)
-}
-
-///=== Two body Problem ===
-/// Uses a simple keplerian, 2-body orbit
-
+// === Constants ===
+// Gravitational constants
 pub const MU_EARTH: f64 = 398600.4418; // km^3s
+pub const MU_MOON: f64 = 0.004903e6; // km^3/s^2
+pub const MU_SUN: f64 = 132712e6; // km^3/s^2
 
-/// Dynamics function for Earth 2-Body system
-/// i.e. Given current state X, fn(X) -> \dot{X}
-/// Note: MU is hard coded here
-/// Note: All state values are in km or km/sec
-pub fn two_body_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
-    let r3_inv = 1.0
-        / (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
-            .sqrt()
-            .powf(3.0);
-    Vector6::new(
-        state[3],
-        state[4],
-        state[5],
-        -MU_EARTH * state[0] * &r3_inv,
-        -MU_EARTH * state[1] * &r3_inv,
-        -MU_EARTH * state[2] * &r3_inv,
-    )
-}
+// gravity perturbations
+pub const J2: f64 = 1.082626925638815e-03; // j2 gravity field coefficient, normalized
+pub const J3: f64 = -0.0000025323; // j3 gravity field coefficient, normalized
 
-/// Spits out the state a given a future time and
-/// initial conditions of the keplerian system
+// drag model
+pub const R_E: f64 = 6378.1363; // radius of the earth (km)
+pub const H_0: f64 = 88667.0; // reference height (m)
+pub const R_0: f64 = 700000.0 + R_E * 1000.0; // reference radius (m)
+pub const RHO_0: f64 = 0.0003614; // kg / km^3
+pub const C_D: f64 = 2.0; // unitless
+pub const A_SAT: f64 = 3.0e-6; // cross sectional area of satellite (km^2)
+pub const MASS: f64 = 970.0; // kg
+
+/// Keplerian state object
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeplerianState {
+    // Orbit radius at time t in km
     pub radius: f64,
+    // Semi major axis of orbit in km
     pub a: f64,
+    // Orbit angular momentum
     pub h: f64,
+    // Inclination of orbit in Radians
     pub incl: f64,
+    // Right ascension of the ascending node in Radians
     pub raan: Option<f64>,
+    // Eccentricity of the orbit [0, 1]
     pub ecc: f64,
+    // Argument of Perigee in Radians
     pub arg_peri: Option<f64>,
+    // True anomaly in Radians
     pub true_anom: f64,
+    // Current Time in Radians
     pub time: f64,
+    // Gravitational Parameter of central body
     pub mu: f64,
 }
 impl KeplerianState {
     pub fn from_peri_rad(
+        // Peripsis radius
         peri_rad: f64,
+        // Eccentricity
         ecc: f64,
+        // Inclination, rad
         incl: f64,
+        // Right ascension of the ascending node, rad
         raan: f64,
+        // Argument of perigee, rad
         arg_peri: f64,
+        // Time since ref epoch, sec
         time: f64,
+        // Gravitational parameter of central body, default = earth
         mu: Option<f64>,
     ) -> Self {
         let mu = mu.unwrap_or(MU_EARTH);
@@ -173,8 +106,14 @@ impl KeplerianState {
 
     // This cartesian state conversion follows the proceedure
     // laid out in Curtis "Orbital Mechanics for engineering students"
-    //
-    pub fn from_cartesian_state(time: f64, cart_state: Vector6<f64>, mu: Option<f64>) -> Self {
+    pub fn from_cartesian_state(
+        // Time since ref epoch, sec
+        time: f64,
+        // Cartesian state vector ECI
+        cart_state: Vector6<f64>,
+        // Gravitational parameter of central body, default = earth
+        mu: Option<f64>,
+    ) -> Self {
         let mu = mu.unwrap_or(MU_EARTH);
         let radius = Vector3::<f64>::new(cart_state[0], cart_state[1], cart_state[2]);
         let velocity = Vector3::<f64>::new(cart_state[3], cart_state[4], cart_state[5]);
@@ -249,7 +188,11 @@ impl KeplerianState {
             .atan2((1.0 + self.ecc).sqrt())
     }
 
-    pub fn propagate_to_time(&self, new_time: f64) -> Self {
+    pub fn propagate_to_time(
+        &self,
+        // time since ref epoch to propagate to in sec
+        new_time: f64,
+    ) -> Self {
         match self.ecc {
             ecc if ecc == 0.0 => {
                 let true_anom = new_time * self.mu.sqrt() / self.radius.powf(3.0 / 2.0);
@@ -298,64 +241,100 @@ impl KeplerianState {
     }
 }
 
-///=== Circularly Restricted 3 body Problem ===
-pub const MU_CR3BP: f64 = 0.0121505; // km^3s
+/// == Istates ==
+/// The following LEO, GTO, and HEO test cases are pulled from:
+/// Amato D. et Al "Non-averaged regularized formulations as an alternative to ..."
 
-/// Dynamics function for Earth-Moon 3-Body system
+// LEO Test case
+// C_D = 2.2, Mass of sc is 400kg, cross sectional area 0.7m^2
+// 5x5 geopotential, lunisolar perturbations, and atmospheric drag
+// Solar flux is held constant as is geomagntic planetary index and amplitude (K_p = 3.0, A_p, F_10.7 = 140 SFU)
+// === Initial state ===
+// a    6862.14 km
+// e    0.0
+// i    97.46 deg
+// raan 281.0 deg
+// u    0.0 deg
+pub const DEG_TO_RAD: f64 = PI / 180.0;
+
+pub const IT_LEO: f64 = 0.0; // MJD
+lazy_static! {
+    pub static ref ISTATE_LEO: KeplerianState = KeplerianState::from_peri_rad(
+        6862.14,
+        0.0,
+        97.46 * DEG_TO_RAD,
+        2810.0 * DEG_TO_RAD,
+        0.0,
+        0.0,
+        None
+    );
+}
+
+// GTO TEST CASE
+// === Initial state ===
+// MJD      57249.958333
+// a        24326.18 km
+// e        0.73
+// i        10.0 deg
+// raan     310.0 deg
+// omega    0.0 deg
+// M        180 deg
+pub const IT_GTO: f64 = 0.0; // MJD
+lazy_static! {
+    // Note: this is in equinotial elements
+    pub static ref ISTATE_GTO: KeplerianState = KeplerianState::from_peri_rad(
+        24326.18 * (1.0 - 0.73),
+        0.73,
+        10.0 * DEG_TO_RAD,
+        310.0 * DEG_TO_RAD,
+        0.0,
+        0.0,
+        None
+    );
+}
+
+// HEO TEST CASE
+// === Initial state ===
+// MJD      57249.958333
+// a        106247.135454 km
+// e        0.75173
+// i        5.2789
+// raan     49.351 deg
+// omega    180.0 deg
+// M        0 deg
+pub const IT_HEO: f64 = 0.0; // MJD
+lazy_static! {
+    pub static ref ISTATE_HEO: KeplerianState = KeplerianState::from_peri_rad(
+        106247.135454 * (1.0 - 0.75173),
+        0.75173,
+        5.2789 * DEG_TO_RAD,
+        49.351 * DEG_TO_RAD,
+        180.0 * DEG_TO_RAD,
+        0.0,
+        None,
+    );
+}
+
+/// Dynamics function for Earth 2-Body system
 /// i.e. Given current state X, fn(X) -> \dot{X}
 /// Note: MU is hard coded here
-/// Note: All state values are in non-dimensionalized units
-pub fn cr3bp_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
-    // computes inverse cubed of r1 and r2
-    let r13_inv = 1.0
-        / ((state[0] + MU_CR3BP).powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
+/// Note: All state values are in km or km/sec
+pub fn two_body_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
+    let r3_inv = 1.0
+        / (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
             .sqrt()
             .powf(3.0);
-    let r23_inv = 1.0
-        / ((state[0] - (1.0 - MU_CR3BP).powf(2.0)) + state[1].powf(2.0) + state[2].powf(2.0))
-            .sqrt()
-            .powf(3.0);
-
     Vector6::new(
         state[3],
         state[4],
         state[5],
-        state[0] + 2.0 * state[4]
-            - (1.0 - MU_CR3BP) * (state[0] + MU_CR3BP) * &r13_inv
-            - MU_CR3BP * (state[0] - (1.0 - MU_CR3BP)) * &r23_inv,
-        state[1]
-            - 2.0 * state[3]
-            - (1.0 - MU_CR3BP) * state[1] * &r13_inv
-            - MU_CR3BP * state[1] * &r23_inv,
-        -(1.0 - MU_CR3BP) * state[2] * &r13_inv - MU_CR3BP * state[2] * &r23_inv,
+        -MU_EARTH * state[0] * &r3_inv,
+        -MU_EARTH * state[1] * &r3_inv,
+        -MU_EARTH * state[2] * &r3_inv,
     )
 }
 
 ///=== Perturbations ===
-//
-// The following perturbations are provided for testing:
-// - Drag (exponential model)
-// - J2
-// - J3
-// - Moon point mass (mean elements)
-// - Sun point mass (circular earth orbit)
-// NOTE: Sun and moon point mass are only for testing and are
-// not physically accurate models. Ephemerides should be used for
-// practical applications
-//
-// == constants ==
-// gravity perturbations
-pub const J2: f64 = 1.082626925638815e-03; // j2 gravity field coefficient, normalized
-pub const J3: f64 = -0.0000025323; // j3 gravity field coefficient, normalized
-
-// drag model
-pub const R_E: f64 = 6378.1363; // radius of the earth (km)
-pub const H_0: f64 = 88667.0; // reference height (m)
-pub const R_0: f64 = 700000.0 + R_E * 1000.0; // reference radius (m)
-pub const RHO_0: f64 = 0.0003614; // kg / km^3
-pub const C_D: f64 = 2.0; // unitless
-pub const A_SAT: f64 = 3.0e-6; // cross sectional area of satellite (km^2)
-pub const MASS: f64 = 970.0; // kg
 
 // == Drag perturbations ==
 pub fn drag_pert(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
@@ -426,7 +405,6 @@ pub fn j3_pert(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
 }
 
 // == Third Body perturbations ==
-pub const MU_MOON: f64 = 0.004903e6; // km^3/s^2
 lazy_static! {
     pub static ref MOON_ORBIT: KeplerianState =
         KeplerianState::from_peri_rad(383397.7725, 0.0, 0.4984066932, 0.0, 0.0, 0.0, None,);
@@ -450,7 +428,6 @@ pub fn moon_pert(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
     )
 }
 
-pub const MU_SUN: f64 = 132712e6; // km^3/s^2
 lazy_static! {
     pub static ref EARTH_ORBIT: KeplerianState =
         KeplerianState::from_peri_rad(149.60e6, 0.0, 0.401425728, 0.0, 0.0, 0.0, Some(MU_SUN));
@@ -474,6 +451,7 @@ pub fn sun_pert(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
     )
 }
 
+// Dynamics with all available perturbations added
 pub fn full_perturbed_2body_dyn(time: f64, state: &Vector6<f64>) -> Vector6<f64> {
     two_body_dyn(time, state)
         + drag_pert(time, state)
@@ -486,7 +464,6 @@ pub fn full_perturbed_2body_dyn(time: f64, state: &Vector6<f64>) -> Vector6<f64>
 #[cfg(test)]
 mod tests {
     use super::*;
-
     const TOL: f64 = 1.0e-12;
 
     #[test]

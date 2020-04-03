@@ -171,10 +171,11 @@ where
 mod tests {
     use super::*;
     use crate::runge_kutta::rk_simp::RK4;
-    use crate::test_fxns::{one_d_dynamics, one_d_solution, 
-        ONE_D_INIT_TIME, ONE_D_INIT_VAL, two_d_dynamics, two_d_solution,
-        IT_2_D, IV_2_D, KeplerianState, full_perturbed_2body_dyn
+    use crate::test_fxns::kepler::{full_perturbed_2body_dyn, two_body_dyn, KeplerianState};
+    use crate::test_fxns::one_d::{
+        one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
     };
+    use crate::test_fxns::two_d::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
     use na::{Vector1, Vector2};
 
     #[test]
@@ -217,7 +218,7 @@ mod tests {
     }
 
     //#[test]
-    fn can_i_prop_full_pert() { 
+    fn can_i_prop_full_pert() {
         let kep_init = KeplerianState::from_peri_rad(8000.0, 0.001, 0.0, 0.0, 0.0, 0.0, None);
         let cart_init = kep_init.into_cartesian();
 

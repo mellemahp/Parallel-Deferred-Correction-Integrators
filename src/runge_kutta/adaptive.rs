@@ -87,7 +87,7 @@ mod tests {
     use crate::runge_kutta::tableaus::EmbeddedTableau;
     use nalgebra::{Matrix4, Vector1, Vector4};
 
-    use crate::test_fxns::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
+    use crate::test_fxns::two_d::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
     use na::Vector2;
 
     fn test_dyn(t: f64, y: &Vector1<f64>) -> Vector1<f64> {
