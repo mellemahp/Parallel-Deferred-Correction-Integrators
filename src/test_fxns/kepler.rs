@@ -320,17 +320,16 @@ lazy_static! {
 /// Note: MU is hard coded here
 /// Note: All state values are in km or km/sec
 pub fn two_body_dyn(_time: f64, state: &Vector6<f64>) -> Vector6<f64> {
-    let r3_inv = 1.0
-        / (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
-            .sqrt()
-            .powf(3.0);
+    let r3 = (state[0].powf(2.0) + state[1].powf(2.0) + state[2].powf(2.0))
+        .sqrt()
+        .powf(3.0);
     Vector6::new(
         state[3],
         state[4],
         state[5],
-        -MU_EARTH * state[0] * &r3_inv,
-        -MU_EARTH * state[1] * &r3_inv,
-        -MU_EARTH * state[2] * &r3_inv,
+        -MU_EARTH * state[0] / r3,
+        -MU_EARTH * state[1] / r3,
+        -MU_EARTH * state[2] / r3,
     )
 }
 

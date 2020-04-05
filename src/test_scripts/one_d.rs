@@ -111,7 +111,7 @@ mod tests {
                     min_step: Some(1e-10_f64),
                     poly_order: Some(3),
                     corrector_order: Some(n),
-                    restart_length: Some(100),
+                    restart_length: Some(200),
                     convergence_tol: Some(1e-8_f64),
                 };
 

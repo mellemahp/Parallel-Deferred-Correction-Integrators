@@ -135,7 +135,7 @@ mod tests {
                 println!("[2d adaptive], {:?}, {:?}, {:?}", integ, dur, diff);
             }
         }
-        */
+
         println!("STARTING PARALLEL");
         // Test RIDC Methods
         for n in 1..=4 {
@@ -159,9 +159,10 @@ mod tests {
                 println!("[2d adaptive], RIDC(3)({})[100], {:?}, {:?}", n, dur, diff);
             }
         }
+        */
 
-        for c in 1..=4 {
-            for step in vec![0.001] {
+        for c in vec![3] {
+            for step in vec![0.05] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector4::repeat(1e-10)),
                     rtol: Some(1e-7),

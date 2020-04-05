@@ -21,7 +21,9 @@ use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 // local imports
 use super::common::{IVPSolData, IVPSolMsg};
 use crate::lagrange::quadrature::{get_weights, get_x_pow, specific_weights};
-use crate::utils::newton_raphson::{newton_raphson_broyden, newton_raphson_fdiff};
+use crate::utils::newton_raphson::{
+    newton_raphson_broyden, newton_raphson_fdiff, newton_raphson_linsrch,
+};
 
 // Standard library imports
 use std::collections::VecDeque;
@@ -190,7 +192,7 @@ where
                     + &quadrature)
             };
 
-            let root_sol = newton_raphson_fdiff(
+            let root_sol = newton_raphson_broyden(
                 root_problem,
                 self.y_ests[l - i - 1].clone(),
                 self.convergence_tol,
