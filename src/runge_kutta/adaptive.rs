@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn test_DOPRI78_2d() {
+    fn test_dopri78_2d() {
         let time_end = 1.0;
         let dt = time_end - IT_2_D;
         let options = IntegOptions::default();

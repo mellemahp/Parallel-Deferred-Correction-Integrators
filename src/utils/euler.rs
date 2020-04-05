@@ -9,7 +9,7 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 
 // local imports
-use crate::newton_raphson::newton_raphson_fdiff;
+use super::newton_raphson::newton_raphson_fdiff;
 
 // === End Imports ===
 
@@ -63,8 +63,8 @@ mod tests {
         // Calculated ans using scipy integrate
         const TOL: f64 = 1.0e-5_f64;
         assert!((out[0] - one_d_solution(t1)[0]).abs() < TOL);
-        println!("ESTIMATE | {:?}", out);
-        println!("TRUTH! {:?} | ", one_d_solution(t1));
+        //println!("ESTIMATE | {:?}", out);
+        //println!("TRUTH! {:?} | ", one_d_solution(t1));
     }
     /*
         //#[test]

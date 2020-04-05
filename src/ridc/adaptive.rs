@@ -57,13 +57,13 @@ where
         // Unwrap Options to defaults
         let atol = integ_opts
             .atol
-            .unwrap_or(VectorN::<f64, N>::repeat(1e-5_f64));
-        let rtol = integ_opts.rtol.unwrap_or(1e-4_f64);
+            .unwrap_or(VectorN::<f64, N>::repeat(1e-9_f64));
+        let rtol = integ_opts.rtol.unwrap_or(1e-6_f64);
         let min_step_size = integ_opts.min_step.unwrap_or(1e-10_f64);
         let poly_order = integ_opts.poly_order.unwrap_or(3); // ONLY 3 is currently supported
         let corrector_order = integ_opts.corrector_order.unwrap_or(1);
         let restart_length = integ_opts.restart_length.unwrap_or(100);
-        let corr_conv_tol = integ_opts.convergence_tol.unwrap_or(1.0e-10_f64);
+        let corr_conv_tol = integ_opts.convergence_tol.unwrap_or(1.0e-8_f64);
 
         // Initialize results struct and other integration variables
         let mut results = IntegResult::new(t_0, y_0.clone());
@@ -134,7 +134,6 @@ where
                         sub_step = nxt_step;
                         counter += 1;
                     } else if (counter % restart_length == 0) && !(just_restarted) {
-                        println!("GOT HERE!!!");
                         // stop and wait for other threads to catch up
                         self.collect_results(&root_rx, &mut results)?;
                         y_last = results.states[results.states.len() - 1].clone();
@@ -184,15 +183,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runge_kutta::common::IntegOptions;
-    use crate::runge_kutta::rk_embed::{RK32, RKF45};
-    use crate::test_fxns::kepler::{two_body_dyn, KeplerianState};
+    use crate::runge_kutta::rk_embed::RK32;
     use crate::test_fxns::one_d::{
         one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
     };
     use crate::test_fxns::two_d::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
-    use na::{Vector1, Vector2, Vector6};
-    use std::time::Instant;
+    use na::{Vector1, Vector2};
 
     #[test]
     fn test_ridc_1d() {
@@ -223,261 +219,9 @@ mod tests {
         let ans = RK32
             .parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, options)
             .unwrap();
-        let tol_val = Vector2::repeat(1e-7);
+        let tol_val = Vector2::repeat(1e-3);
         let diff = (two_d_solution(time_end) - ans.last_y()).abs();
         println!("DIFF 2d | {:?}", diff);
         assert!(diff < tol_val);
-    }
-
-    // Generates data for plotting the Acccuracy vs CPU time
-    //#[test]
-    fn test_time_to_acc_2d() {
-        let accs: Vec<f64> = vec![
-            1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64, 1e-12_f64,
-        ];
-
-        let time_end = 5.0;
-        let dt = time_end - IT_2_D;
-        //let par_options = IntegOptionsParallel::default();
-
-        let parallel = RK32.clone();
-        let regular_32 = RK32.clone();
-
-        // test reg runge kutta integrators
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector2::repeat(*acc)),
-                rtol: Some(*acc * 10e3_f64),
-                min_step: Some(1e-14_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = regular_32
-                .integrate(
-                    two_d_dynamics,
-                    IT_2_D,
-                    IV_2_D.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (two_d_solution(time_end) - ans_reg.last_y()).norm();
-            println!("[RK32 2D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-        // test cash Karp 45
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector2::repeat(*acc)),
-                rtol: Some(*acc * 10e3_f64),
-                min_step: Some(1e-10_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = RKF45
-                .clone()
-                .integrate(
-                    two_d_dynamics,
-                    IT_2_D,
-                    IV_2_D.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (two_d_solution(time_end) - ans_reg.last_y()).norm();
-            println!("[RK45 2D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-
-        // test cash Karp 45
-        for n in 1..10 {
-            let par_options = IntegOptionsParallel {
-                atol: Some(Vector2::repeat(1e-6_f64)),
-                rtol: Some(1e-3_f64),
-                min_step: Some(1e-10_f64),
-                poly_order: Some(3),
-                corrector_order: Some(n),
-                restart_length: Some(100),
-                convergence_tol: Some(1e-10_f64),
-            };
-            let start = Instant::now();
-            let ans_par = RK32
-                .parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, par_options.clone())
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (two_d_solution(time_end) - ans_par.last_y()).norm();
-            println!("[PARALLEL 2D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-    }
-
-    // Generates data for plotting the Acccuracy vs CPU time
-    //#[test]
-    fn test_time_to_acc_1d() {
-        let accs: Vec<f64> = vec![
-            1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64, 1e-12_f64,
-        ];
-        let time_end = 5.0;
-        let dt = time_end - ONE_D_INIT_TIME;
-
-        let parallel = RK32.clone();
-        let regular_32 = RK32.clone();
-
-        // test reg runge kutta integrators
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector1::repeat(*acc)),
-                rtol: Some(*acc * 10e3_f64),
-                min_step: Some(1e-14_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = regular_32
-                .integrate(
-                    one_d_dynamics,
-                    ONE_D_INIT_TIME,
-                    ONE_D_INIT_VAL.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (one_d_solution(time_end) - ans_reg.last_y()).norm();
-            println!("[RK32] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-        // test cash Karp 45
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector1::repeat(*acc)),
-                rtol: Some(*acc * 10e3_f64),
-                min_step: Some(1e-10_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = RKF45
-                .clone()
-                .integrate(
-                    one_d_dynamics,
-                    ONE_D_INIT_TIME,
-                    ONE_D_INIT_VAL.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (one_d_solution(time_end) - ans_reg.last_y()).norm();
-            println!("[Rk45 1D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-
-        // test cash Karp 45
-        for n in 1..10 {
-            let par_options = IntegOptionsParallel {
-                atol: Some(Vector1::repeat(1e-6_f64)),
-                rtol: Some(1e-3_f64),
-                min_step: Some(1e-10_f64),
-                poly_order: Some(3),
-                corrector_order: Some(n),
-                restart_length: Some(100),
-                convergence_tol: Some(1e-10_f64),
-            };
-            let start = Instant::now();
-            let ans_par = RK32
-                .parallel_integrator(
-                    one_d_dynamics,
-                    ONE_D_INIT_TIME,
-                    &ONE_D_INIT_VAL,
-                    dt,
-                    par_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff = (one_d_solution(time_end) - ans_par.last_y()).norm();
-            println!("[PARALLEL 1D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-    }
-
-    //#[test]
-    fn test_time_to_acc_kep_0001() {
-        // INitial state
-        let kep_init = KeplerianState::from_peri_rad(8000.0, 0.001, 0.0, 0.0, 0.0, 0.0, None);
-        let cart_init = kep_init.into_cartesian();
-
-        // Initialize integrators
-        let accs: Vec<f64> = vec![
-            1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64, 1e-12_f64,
-        ];
-
-        let regular_32 = RK32.clone();
-        let time_end = 3500.0;
-        let dt = time_end;
-
-        // test reg runge kutta integrators
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector6::repeat(*acc)),
-                rtol: Some(*acc),
-                min_step: Some(1e-12_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = regular_32
-                .integrate(
-                    two_body_dyn,
-                    0.0,
-                    cart_init.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff =
-                (kep_init.propagate_to_time(time_end).into_cartesian() - ans_reg.last_y()).norm();
-
-            println!("[RK32] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-        // test cash Karp 45
-        for acc in &accs {
-            let reg_options = IntegOptions {
-                atol: Some(Vector6::repeat(*acc)),
-                rtol: Some(*acc),
-                min_step: Some(1e-12_f64),
-            };
-            let start = Instant::now();
-            let ans_reg = RKF45
-                .clone()
-                .integrate(
-                    two_body_dyn,
-                    0.0,
-                    cart_init.clone(),
-                    dt,
-                    reg_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff =
-                (kep_init.propagate_to_time(time_end).into_cartesian() - ans_reg.last_y()).norm();
-            println!("[Rk45 1D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
-
-        // test cash Karp 45
-        for n in 1..3 {
-            let par_options = IntegOptionsParallel {
-                atol: Some(Vector6::repeat(1e-6_f64)),
-                rtol: Some(1e-6_f64),
-                min_step: Some(1e-10_f64),
-                poly_order: Some(3),
-                corrector_order: Some(n),
-                restart_length: Some(100),
-                convergence_tol: Some(1e-8_f64),
-            };
-            let start = Instant::now();
-            let ans_par = RK32
-                .parallel_integrator(
-                    two_body_dyn,
-                    0.0,
-                    &cart_init.clone(),
-                    dt,
-                    par_options.clone(),
-                )
-                .unwrap();
-            let dur = start.elapsed().as_millis();
-            let diff =
-                (kep_init.propagate_to_time(time_end).into_cartesian() - ans_par.last_y()).norm();
-            println!("[PARALLEL 2D] TIME: {:?} | ACC_OUT: {:?}", dur, diff);
-        }
     }
 }

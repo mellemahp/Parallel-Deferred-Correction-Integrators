@@ -171,7 +171,6 @@ where
 mod tests {
     use super::*;
     use crate::runge_kutta::rk_simp::RK4;
-    use crate::test_fxns::kepler::{full_perturbed_2body_dyn, two_body_dyn, KeplerianState};
     use crate::test_fxns::one_d::{
         one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
     };
@@ -209,26 +208,11 @@ mod tests {
         let step = 0.5;
         let options = IntegOptionsParallel::default();
         let ans = RK4
-            .parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, 0.5, options)
+            .parallel_integrator(two_d_dynamics, IT_2_D, &IV_2_D, dt, step, options)
             .unwrap();
         let tol_val = Vector2::repeat(1e-7);
         let diff = (two_d_solution(time_end) - ans.last_y()).abs();
         println!("DIFF 2d | {:?}", diff);
         assert!(diff < tol_val);
-    }
-
-    //#[test]
-    fn can_i_prop_full_pert() {
-        let kep_init = KeplerianState::from_peri_rad(8000.0, 0.001, 0.0, 0.0, 0.0, 0.0, None);
-        let cart_init = kep_init.into_cartesian();
-
-        let time_end = 2000.0;
-        let dt = time_end - IT_2_D;
-        let step = 1.0;
-        let options = IntegOptionsParallel::default();
-        let ans = RK4
-            .parallel_integrator(full_perturbed_2body_dyn, 0.0, &cart_init, dt, step, options)
-            .unwrap();
-        println!("KEP_ANS {:?}", ans.last_y());
     }
 }

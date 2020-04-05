@@ -237,7 +237,7 @@ pub mod rk_embed {
     // Dormand Prince 7(8) from GMAT math spec
     lazy_static! {
         pub static ref DOPRI78: EmbeddedRKStepper<U13> = EmbeddedRKStepper::new(
-            "Cash-Karp 4(5)",
+            "Cash-Karp 7(8)",
             EmbeddedTableau {
                 a_vals: Matrix13::from_row_slice(&[
                     0.0,

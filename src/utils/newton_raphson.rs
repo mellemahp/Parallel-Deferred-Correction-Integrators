@@ -11,6 +11,9 @@ extern crate nalgebra as na;
 use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, MatrixN, VectorN, U1};
 
+// local imports
+use super::finite_diff::fdiff_jacobian;
+
 // === End Imports ===
 
 // Newton raphson method using Broydens method
@@ -35,10 +38,25 @@ where
 {
     const MAX_ITER: i32 = 100;
     const INV_TOL: f64 = 1.0_e-10_f64;
+    const TOLX: f64 = 1.0_e-7_f64;
 
     // pre-initialize variables
+    let dim = x_0.len();
     let mut f_n = fxn(&x_0);
     let mut x_last = x_0.clone();
+
+    // check if first guess is root
+    let mut test = 0.0;
+    for idx in 0..dim {
+        if f_n[idx].abs() > test {
+            test = f_n[idx].abs()
+        }
+    }
+    if test < 0.01 * acc {
+        return Ok(x_last);
+    }
+
+    // if initial guess is not a root initialize values
     let mut jac: MatrixN<f64, N> = fdiff_jacobian(&fxn, &f_n, &x_0);
 
     // empty allocations
@@ -47,22 +65,48 @@ where
     let mut del_x: VectorN<f64, N>;
     let mut del_x_norm: f64;
     let mut del_f: VectorN<f64, N>;
+    let mut test_f: f64;
+    let mut test_x: f64;
 
     // Iterate to victory!
     for _ in 0..MAX_ITER {
+        // update x guess
         x_new = &x_last - jac.clone().pseudo_inverse(INV_TOL)? * &f_n;
+
         del_x = &x_new - &x_last;
         del_x_norm = del_x.norm();
-        if del_x_norm < acc {
-            return Ok(x_new);
+
+        // check for convergence of x
+        test_x = 0.0;
+        for idx in 0..dim {
+            let temp = (del_x[idx]).abs() / (x_new[idx]).abs().max(1.0);
+            if temp > test_x {
+                test_x = temp;
+            }
+        }
+        if test_x < TOLX {
+            return Ok(x_last);
         }
         x_last = x_new.clone();
-        f_last = f_n;
+
+        // Function updates
+        f_last = f_n.clone();
         f_n = fxn(&x_new);
         del_f = &f_n - &f_last;
-        jac = &jac + 1.0 / del_x_norm.powf(2.0) * (&del_f - &jac * &del_x) * &del_x.transpose();
+
+        // check for convergence of function
+        test_f = 0.0;
+        for idx in 0..dim {
+            if (f_n[idx]).abs() > test_f {
+                test_f = f_n[idx].abs();
+            }
+        }
+        if test_f < acc {
+            return Ok(x_new);
+        }
+        jac = &jac + (&del_f - &jac * &del_x) / del_x_norm.powf(2.0) * &del_x.transpose();
     }
-    return Err("Maximum Number of Iterations Reached");
+    return Err("[NEWTON BROYDEN] Maximum Number of Iterations Reached");
 }
 
 // Basic newton-raphson method using finite differencing
@@ -84,88 +128,73 @@ where
 {
     const MAX_ITER: i32 = 100;
     const INV_TOL: f64 = 1.0_e-10_f64;
+    const TOLX: f64 = 1.0_e-7_f64;
 
     // pre-initialize variables
     let mut fk = fxn(&x_0);
+    let dim = x_0.len();
+
+    // check if first guess is root
+    let mut test = 0.0;
+    for idx in 0..dim {
+        if fk[idx].abs() > test {
+            test = fk[idx].abs()
+        }
+    }
+    if test < 0.01 * acc {
+        return Ok(x_0);
+    }
+
+    // if not a root initialize other vals
     let mut jac_inv: MatrixN<f64, N> = fdiff_jacobian(&fxn, &fk, &x_0).pseudo_inverse(INV_TOL)?;
     let mut x_new: VectorN<f64, N>;
+    let mut del_x: VectorN<f64, N>;
     let mut x_last = x_0.clone();
+    let mut test_x: f64;
+    let mut test_f: f64;
 
     // Iterate to victory!
     for _j in 0..MAX_ITER {
-        x_new = &x_last - jac_inv * fk;
-        if (&x_new - &x_last).norm() < acc {
-            return Ok(x_new);
+        // update x
+        x_new = &x_last - jac_inv * &fk;
+        del_x = &x_new - &x_last;
+
+        // check for convergence of x
+        test_x = 0.0;
+        for idx in 0..dim {
+            let temp = (del_x[idx]).abs() / x_new[idx].max(1.0);
+            if temp > test_x {
+                test_x = temp;
+            }
+        }
+        if test_x < TOLX {
+            return Ok(x_last);
         }
         x_last = x_new.clone();
+
+        // update function
         fk = fxn(&x_new);
+
+        // check for convergence of function
+        test_f = 0.0;
+        for idx in 0..dim {
+            if fk[idx] > test_f {
+                test_f = fk[idx].abs();
+            }
+        }
+        if test_f < acc {
+            return Ok(x_new);
+        }
+
         jac_inv = fdiff_jacobian(&fxn, &fk, &x_new).pseudo_inverse(INV_TOL)?;
     }
     return Err("Maximum Number of Iterations Reached");
-}
-
-// per numerical recipes chpt 5 pg 230 we use
-// h \approx \sqrt(e_f) * x_c where x_c is the curvature scale
-// typically we assume x_c = x unless x is near 0 then we want to use
-// another value
-fn fdiff_jacobian<F, N: Dim + DimName>(
-    fxn: &F,
-    y: &VectorN<f64, N>,
-    x: &VectorN<f64, N>,
-) -> MatrixN<f64, N>
-where
-    F: Fn(&VectorN<f64, N>) -> VectorN<f64, N>,
-    DefaultAllocator: Allocator<f64, N> + Allocator<f64, N, N>,
-{
-    // Approximately sqrt of ULP precision
-    const H_FACTOR: f64 = 2.0e-7_f64;
-    // Used to check if X is near zero
-    const Z_TOL: f64 = 1.0e-12;
-    // Alternative step if X is near zero
-    const Z_FACTOR: f64 = 1.0e-14;
-
-    // Initialize a vector for differences
-    let shift_vals = VectorN::<f64, N>::from_iterator(x.iter().map(|val| {
-        if *val > Z_TOL {
-            val * H_FACTOR
-        } else {
-            Z_FACTOR
-        }
-    }));
-
-    // Pre-initialize values
-    let mut diff: VectorN<f64, N> = VectorN::<f64, N>::zeros();
-    let mut columns: Vec<VectorN<f64, N>> = Vec::new();
-    let mut fxn_shift: VectorN<f64, N>;
-
-    for m in 0..x.len() {
-        diff.fill(0.0);
-        diff[m] = shift_vals[m];
-        fxn_shift = fxn(&(x + &diff));
-        columns.push((&fxn_shift - y) / shift_vals[m]);
-    }
-
-    MatrixN::<f64, N>::from_columns(&columns)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use na::{Matrix2, Vector1, Vector2};
-
-    #[test]
-    fn test_jacobian() {
-        let y = Vector2::new(1.0, 2.0);
-        let x = |z: &Vector2<f64>| z.component_mul(&y);
-        let z_0 = Vector2::new(2.0, 2.0);
-        let y_0 = x(&z_0);
-        let jac = fdiff_jacobian(&x, &y_0, &z_0);
-        const TOL: f64 = 1.0e-8_f64;
-        let solution = Matrix2::new(1.0, 0.0, 0.0, 2.0);
-        for idx in 0..4 {
-            assert!((jac[idx] - solution[idx]).abs() < TOL);
-        }
-    }
 
     #[test]
     fn test_newton_1d() {
@@ -195,6 +224,7 @@ mod tests {
         let ans =
             newton_raphson_fdiff(fxn, i_guess, 1.0e-6_f64).expect("Couldn't converge to solution");
 
+        println!("{:?}", ans);
         let python_sol = Vector2::new(0.8411639, 0.1588361);
         const TOL: f64 = 1.0e-7_f64;
         for idx in 0..2 {
@@ -207,12 +237,12 @@ mod tests {
         let i_guess = Vector1::new(1.0);
         let fxn = |x: &Vector1<f64>| Vector1::new(x[0].powf(3.0) + 3.0 * x[0] - 7.0);
 
-        let ans = newton_raphson_broyden(fxn, i_guess, 1.0e-6_f64)
+        let ans = newton_raphson_broyden(fxn, i_guess, 1.0e-8_f64)
             .expect("Couldn't converge to solution");
 
         // truth (from wolfram)
         let sol = 1.406287579960534691140831;
-        const TOL: f64 = 1.0e-6_f64;
+        const TOL: f64 = 1.0e-7_f64;
         assert!((ans[0] - sol).abs() < TOL);
     }
 

@@ -26,7 +26,7 @@ lazy_static! {
 // Dynamics
 pub fn one_d_dynamics(t: f64, y: &Vector1<f64>) -> Vector1<f64> {
     // Added For "WEIGHT"
-    sleep(Duration::from_micros(10));
+    sleep(Duration::from_micros(5));
     // END WEIGHTING
     (Vector1::new(3.0) - 4.0 * y) / (2.0 * t)
 }
