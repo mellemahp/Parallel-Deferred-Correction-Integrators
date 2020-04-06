@@ -33,7 +33,7 @@ where
 
     // Initialize a vector for differences
     let shift_vals = VectorN::<f64, N>::from_iterator(x.iter().map(|val| {
-        if val * H_FACTOR < Z_LIM{
+        if val * H_FACTOR < Z_LIM {
             let temp = val + val.abs() * H_FACTOR;
             temp - val
         } else {

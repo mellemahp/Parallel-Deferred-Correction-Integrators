@@ -59,6 +59,7 @@ where
             return Ok((x, f_vec, f_new));
         }
         println!("SLOPE {:?}", slope);
+        //slope = -slope;
         return Err("Roundoff problem in linsrch_w_backtracking");
     }
 

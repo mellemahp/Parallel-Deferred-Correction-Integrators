@@ -15,7 +15,7 @@ mod tests {
     use crate::ridc::common::IntegOptionsParallel;
     use crate::runge_kutta::adaptive::AdaptiveStep;
     use crate::runge_kutta::common::IntegOptions;
-    use crate::runge_kutta::rk_embed::{CASH_KARP45, RK32, RKF45};
+    use crate::runge_kutta::rk_embed::{CASH_KARP45, DOPRI78, RK32, RKF45};
     use crate::runge_kutta::rk_simp::RK4;
     use crate::test_fxns::kepler::*;
     use crate::utils::finite_diff::fdiff_jacobian_2;
@@ -59,23 +59,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_time_to_acc_kep_0001() {
         // INitial state
-        let kep_init = ISTATE_LEO.clone();
+        let kep_init = ISTATE_GTO.clone();
         let cart_init = kep_init.into_cartesian();
         println!("{:?}", cart_init);
 
         // Initialize integrators
         let accs: Vec<f64> = vec![
             1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64, 1e-12_f64, 1e-13_f64,
-            1e-14_f64, 1e-15_f64, 1e-16_f64,
+            1e-14_f64, 1e-15_f64, 1e-16_f64, 1e-17_f64, 1e-18_f64,
         ];
 
-        let time_end = 3500.0;
+        let time_end = 2000.0;
         let dt = time_end;
 
         // test reg runge kutta integrators
-        for integ in vec!["bogacki32", "cash_karp45"] {
+        for integ in vec!["bogacki32", "cash_karp45", "dopri78"] {
             for acc in &accs {
                 let reg_options = IntegOptions {
                     atol: Some(Vector6::repeat(*acc)),
@@ -124,6 +125,35 @@ mod tests {
                             (diff[1].powf(2.0) + diff[2].powf(2.0) + diff[3].powf(2.0)).sqrt();
                         (dur, diff_pos, diff_vel)
                     }
+                    "dopri78" => {
+                        // takes too long otherwise. Goes rapidly to machine precision
+                        if *acc >= 1e-8_f64 {
+                            let reg_options = IntegOptions {
+                                atol: Some(Vector6::repeat(*acc * 10e2_f64)),
+                                rtol: Some(*acc * 10e5_f64),
+                                min_step: Some(1e-10_f64),
+                            };
+                            let ans_reg = DOPRI78
+                                .integrate(
+                                    two_body_dyn,
+                                    0.0,
+                                    cart_init.clone(),
+                                    dt,
+                                    reg_options.clone(),
+                                )
+                                .unwrap();
+                            let dur = start.elapsed().as_millis();
+                            let diff = kep_init.propagate_to_time(time_end).into_cartesian()
+                                - ans_reg.last_y();
+                            let diff_pos =
+                                (diff[0].powf(2.0) + diff[1].powf(2.0) + diff[2].powf(2.0)).sqrt();
+                            let diff_vel =
+                                (diff[1].powf(2.0) + diff[2].powf(2.0) + diff[3].powf(2.0)).sqrt();
+                            (dur, diff_pos, diff_vel)
+                        } else {
+                            (0, 0.0, 0.0)
+                        }
+                    }
                     _ => (0, 0.0, 0.0),
                 };
 
@@ -131,7 +161,7 @@ mod tests {
             }
         }
         for c in vec![4] {
-            for step in vec![10.0, 5.0, 4.0] {
+            for step in vec![100.0, 50.0, 10.0, 5.0, 4.0, 1.0] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector6::repeat(1e-9)),
                     rtol: Some(1e-6),
@@ -158,22 +188,22 @@ mod tests {
                 let diff_vel = (diff[1].powf(2.0) + diff[2].powf(2.0) + diff[3].powf(2.0)).sqrt();
 
                 println!(
-                    "[RIDC FIXED] {}, {:?}, {:?}, {:?}",
+                    "RIDC FIXED {}, {:?}, {:?}, {:?}",
                     c, dur, diff_pos, diff_vel
                 );
             }
         }
         println!("STARTING DAT SEXY PARALLEL INTEGRATION");
         // test adaptive RIDC
-        for n in vec![3] {
-            for acc in vec![1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64] {
+        for n in vec![4] {
+            for acc in vec![1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector6::repeat(acc)),
                     rtol: Some(acc * 10e3_f64),
                     min_step: Some(1e-10_f64),
                     poly_order: Some(3),
                     corrector_order: Some(n),
-                    restart_length: Some(200),
+                    restart_length: Some(100),
                     convergence_tol: Some(1e-8),
                 };
                 let start = Instant::now();
@@ -192,7 +222,7 @@ mod tests {
                 let diff_vel = (diff[1].powf(2.0) + diff[2].powf(2.0) + diff[3].powf(2.0)).sqrt();
 
                 println!(
-                    "[PARALLEL 2D] RIDC ADAPTIVE {}, {:?}, {:?}, {:?}",
+                    "RIDC ADAPTIVE {}, {:?}, {:?}, {:?}",
                     n, dur, diff_pos, diff_vel
                 );
             }

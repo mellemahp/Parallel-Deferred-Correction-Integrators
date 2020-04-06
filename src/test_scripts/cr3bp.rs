@@ -67,9 +67,9 @@ mod tests {
             -0.07154723508377878,
             0.10262047715819808,
         );
-        /*
+
         // test all
-        for integ in vec!["bogacki32", "cash_karp45", "dopri78"] {
+        for integ in vec!["bogacki32", "cash_karp45"] {
             for acc in &accs {
                 let reg_options = IntegOptions {
                     atol: Some(Vector4::repeat(*acc)),
@@ -159,10 +159,8 @@ mod tests {
                 println!("[2d adaptive], RIDC(3)({})[100], {:?}, {:?}", n, dur, diff);
             }
         }
-        */
-
         for c in vec![3] {
-            for step in vec![0.05] {
+            for step in vec![0.001, 0.0008, 0.0005] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector4::repeat(1e-10)),
                     rtol: Some(1e-7),
@@ -170,7 +168,7 @@ mod tests {
                     poly_order: Some(3),
                     corrector_order: Some(c),
                     restart_length: Some(100),
-                    convergence_tol: Some(1e-6_f64),
+                    convergence_tol: Some(1e-8_f64),
                 };
                 let start = Instant::now();
                 let ans_par = RK4

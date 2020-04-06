@@ -15,7 +15,7 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, MatrixN, VectorN, U1};
 
 // local imports
-use super::finite_diff::fdiff_jacobian;
+use super::finite_diff::{fdiff_jacobian, fdiff_jacobian_2};
 use super::linsearch::linsrch_w_backtracking;
 
 // === End Imports ===
@@ -40,8 +40,8 @@ where
     <N as DimMin<N>>::Output: DimName,
     <N as DimMin<N>>::Output: DimSub<U1>,
 {
-    const MAX_ITER: i32 = 100;
-    const INV_TOL: f64 = 1.0_e-10_f64;
+    const MAX_ITER: i32 = 200;
+    const INV_TOL: f64 = EPSILON;
     const TOLX: f64 = 1.0_e-7_f64;
 
     // pre-initialize variables
@@ -61,7 +61,7 @@ where
     }
 
     // if initial guess is not a root initialize values
-    let mut jac: MatrixN<f64, N> = fdiff_jacobian(&fxn, &f_n, &x_0);
+    let mut jac: MatrixN<f64, N> = fdiff_jacobian_2(&fxn, &f_n, &x_0);
 
     // empty allocations
     let mut x_new: VectorN<f64, N>;
@@ -130,8 +130,8 @@ where
     <N as DimMin<N>>::Output: DimName,
     <N as DimMin<N>>::Output: DimSub<U1>,
 {
-    const MAX_ITER: i32 = 100;
-    const INV_TOL: f64 = 1.0_e-10_f64;
+    const MAX_ITER: i32 = 200;
+    const INV_TOL: f64 = EPSILON;
     const TOLX: f64 = 1.0_e-7_f64;
 
     // pre-initialize variables
@@ -215,7 +215,7 @@ where
 {
     // Constants
     const MAX_ITER: i32 = 200;
-    const INV_TOL: f64 = 1.0_e-10_f64;
+    const INV_TOL: f64 = EPSILON;
     const TOLX: f64 = EPSILON;
     const STEP_MAX: f64 = 100.0;
 
