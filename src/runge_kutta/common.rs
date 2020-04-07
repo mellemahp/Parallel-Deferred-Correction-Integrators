@@ -53,7 +53,7 @@ pub trait StepSimple {
         t_0: f64,
         y_0: &VectorN<f64, N>,
         step: f64,
-    ) -> VectorN<f64, N>
+    ) -> StepResult<N>
     where
         DefaultAllocator: Allocator<f64, N>;
 }

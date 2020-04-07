@@ -21,7 +21,9 @@ use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 // local imports
 use super::common::{IVPSolData, IVPSolMsg};
 use crate::lagrange::quadrature::{get_weights, get_x_pow, specific_weights};
-use crate::newton_raphson::newton_raphson_broyden;
+use crate::utils::newton_raphson::{
+    newton_raphson_broyden, newton_raphson_fdiff, newton_raphson_linsrch,
+};
 
 // Standard library imports
 use std::collections::VecDeque;
@@ -136,6 +138,9 @@ where
                 Ok(msg) => match msg {
                     IVPSolMsg::PROCESS(data) => data,
                     IVPSolMsg::TERMINATE => {
+                        self.tx
+                            .send(IVPSolMsg::TERMINATE)
+                            .expect("Failure to send TERMINATE message to downstream threads");
                         break;
                     }
                 },
@@ -189,7 +194,7 @@ where
 
             let root_sol = newton_raphson_broyden(
                 root_problem,
-                self.y_ests[l - i].clone(),
+                self.y_ests[l - i - 1].clone(),
                 self.convergence_tol,
             )?;
 

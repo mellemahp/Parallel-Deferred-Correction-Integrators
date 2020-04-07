@@ -22,7 +22,6 @@
 /// (4) Diagonally-implicit method: a_ii = const for i = 1, 2, ... , s
 ///
 /// NOTE: This library does not currently support Diagonally-implicit methods
-
 // === Begin Imports ===
 // third party imports
 extern crate nalgebra as na;

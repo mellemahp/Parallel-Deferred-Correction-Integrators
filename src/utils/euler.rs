@@ -9,7 +9,7 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimMin, DimName, DimSub, VectorN, U1};
 
 // local imports
-use crate::newton_raphson::newton_raphson_fdiff;
+use super::newton_raphson::newton_raphson_fdiff;
 
 // === End Imports ===
 
@@ -51,8 +51,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fxns::{one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL};
-    use itertools_num;
+    use crate::test_fxns::one_d::{
+        one_d_dynamics, one_d_solution, ONE_D_INIT_TIME, ONE_D_INIT_VAL,
+    };
+    //use itertools_num;
 
     #[test]
     fn test_fwd_one_step() {
@@ -61,8 +63,8 @@ mod tests {
         // Calculated ans using scipy integrate
         const TOL: f64 = 1.0e-5_f64;
         assert!((out[0] - one_d_solution(t1)[0]).abs() < TOL);
-        println!("ESTIMATE | {:?}", out);
-        println!("TRUTH! {:?} | ", one_d_solution(t1));
+        //println!("ESTIMATE | {:?}", out);
+        //println!("TRUTH! {:?} | ", one_d_solution(t1));
     }
     /*
         //#[test]

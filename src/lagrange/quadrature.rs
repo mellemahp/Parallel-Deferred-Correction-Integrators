@@ -29,21 +29,21 @@ pub fn get_x_pow(x_0: f64, x: f64, order: usize) -> Vec<f64> {
 }
 
 // ---------------------- DIVIDED DIFFERENCE STYLE -------------------------------------
-fn w_dd_0(x_pow: &Vec<f64>) -> f64 {
+pub fn w_dd_0(x_pow: &Vec<f64>) -> f64 {
     x_pow[0]
 }
 
-fn w_dd_1(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
+pub fn w_dd_1(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
     0.5 * x_pow[1] - times[0] * x_pow[0]
 }
 
-fn w_dd_2(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
+pub fn w_dd_2(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
     1.0 / 6.0
         * (6.0 * times[0] * times[1] * x_pow[0] - 3.0 * (times[0] + times[1]) * x_pow[1]
             + 2.0 * x_pow[2])
 }
 
-fn w_dd_3(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
+pub fn w_dd_3(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
     1.0 / 12.0
         * (-12.0 * times[0] * times[1] * times[2] * x_pow[0]
             + 6.0 * (times[0] * (times[1] + times[2]) + times[1] * times[2]) * x_pow[1]
@@ -51,7 +51,7 @@ fn w_dd_3(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
             + 3.0 * x_pow[3])
 }
 
-fn w_dd_4(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
+pub fn w_dd_4(x_pow: &Vec<f64>, times: &VecDeque<f64>) -> f64 {
     1.0 / 60.0
         * (60.0 * times[0] * times[1] * times[2] * times[3] * x_pow[0]
             - 30.0
@@ -106,7 +106,7 @@ pub fn specific_weights(x_pows: Vec<f64>, weights: &Vec<Vec<f64>>) -> Vec<f64> {
         .collect()
 }
 
-fn lagrange_quad_third_order<N: Dim + DimName>(
+pub fn lagrange_quad_third_order<N: Dim + DimName>(
     x_0: f64,
     x: f64,
     weights: &Vec<Vec<f64>>,
@@ -127,7 +127,7 @@ where
 
 // -------------------------------------------------------------------------------------
 
-fn lagrange_quad_fourth_order<N: Dim + DimName>(
+pub fn lagrange_quad_fourth_order<N: Dim + DimName>(
     x_0: f64,
     x: f64,
     times: &VecDeque<f64>,

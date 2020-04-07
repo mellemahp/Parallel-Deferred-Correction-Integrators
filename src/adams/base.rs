@@ -221,7 +221,6 @@ impl<N: Dim + DimName> AdamsUpdate for AdamsData<N>
 where
     DefaultAllocator: Allocator<f64, N>,
 {
-    // TODO: FIX
     fn update_phis(&mut self) {
         // clear out space for the new phi in the buffer. This prevents re-allocation of the ring buffer
         self.phis.pop_back();
@@ -289,15 +288,15 @@ where
 mod tests {
     use super::*;
     use crate::runge_kutta::common::Tolerances;
-    use crate::test_fxns::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
+    use crate::test_fxns::two_d::{two_d_dynamics, two_d_solution, IT_2_D, IV_2_D};
     use na::Vector2;
 
     #[test]
     fn test_gen() {
-        let m: usize = 5;
+        let m: usize = 4;
         let tol = Tolerances {
-            abs: Some(Vector2::new(1.0e-9, 1.0e-9)),
-            rel: Some(1.0e-6_f64),
+            abs: Some(Vector2::new(1.0e-6, 1.0e-6)),
+            rel: Some(1.0e-9_f64),
         };
         let max_step_0 = 0.4;
 

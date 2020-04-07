@@ -21,7 +21,7 @@ use na::allocator::Allocator;
 use na::{DefaultAllocator, Dim, DimName, VectorN};
 
 // Local imports
-use super::common::StepSimple;
+use super::common::{StepResult, StepSimple};
 use super::fixed::FixedStep;
 use super::tableaus::{RkType, Tableau};
 
@@ -72,7 +72,7 @@ where
         t_0: f64,
         y_0: &VectorN<f64, N>,
         step: f64,
-    ) -> VectorN<f64, N>
+    ) -> StepResult<N>
     where
         DefaultAllocator: Allocator<f64, N>,
     {
@@ -98,7 +98,13 @@ where
                     .map(|(i, b)| *b * &ks[i])
                     .fold(VectorN::<f64, N>::zeros(), |sum, val| sum + val);
 
-                y_0 + step * sum_bi_ki
+                let val = y_0 + step * sum_bi_ki;
+                let dyn_eval = fxn(t_0 + step, &val);
+                StepResult {
+                    error: 0.0,
+                    value: val,
+                    dyn_eval: dyn_eval,
+                }
             }
             _ => unimplemented!("Only Explicit Embedded methods currently supported"),
         }
@@ -140,7 +146,7 @@ mod tests {
         let r = RKStepper::new("RK4", b).unwrap();
         let ans = r.step(test_dyn, 0.0, &Vector1::new(0.0), 1.0);
 
-        assert!((ans[0] + 0.5).abs() < 1e-7);
+        assert!((ans.value[0] + 0.5).abs() < 1e-7);
     }
 
     #[test]
@@ -157,7 +163,7 @@ mod tests {
         };
         let r = RKStepper::new("RK4", b).unwrap();
         let ans = r.step(test_dyn_2, 0.0, &Vector1::new(0.0), 1.0);
-        assert_eq!(ans[0], 1.875);
+        assert_eq!(ans.value[0], 1.875);
     }
 
     #[test]
@@ -172,6 +178,6 @@ mod tests {
         };
         let r = RKStepper::new("RK3", b).unwrap();
         let ans = r.step(test_dyn_2, 0.0, &Vector1::new(0.0), 0.5);
-        assert_eq!(ans[0], 0.3125)
+        assert_eq!(ans.value[0], 0.3125)
     }
 }
