@@ -53,6 +53,8 @@ where
     y_ests: VecDeque<VectorN<f64, N>>,
     // Evaluations of the Dynamics function at the final corrected estimate
     fxn_evals: VecDeque<VectorN<f64, N>>,
+    // TODO: remove later into its own trait only required for fwd euler
+    fn_corr_last: Option<VectorN<f64, N>>,
     // Times at which function evals occur
     times: VecDeque<f64>,
     // Handle for recieving messages from channel
@@ -101,6 +103,7 @@ where
             dynamics,
             y_ests,
             fxn_evals,
+            fn_corr_last: None,
             times,
             rx,
             tx,
@@ -157,7 +160,7 @@ where
         self.y_ests.push_front(data.y_nxt);
         self.fxn_evals.push_front(data.dy_nxt);
         self.times.push_front(data.t_nxt);
-
+        
         if self.y_ests.len() == self.poly_order + 1 {
             self.first_correction()?;
             Ok(1)
@@ -216,7 +219,7 @@ where
 
     fn correct(&mut self, data: IVPSolData<N>) -> Result<(), &'static str> {
         // rotate out the oldest point before adding new ones to avoid re-allocation
-        self.y_ests.pop_back().expect("Could not append new state");
+        self.y_ests.pop_back().expect("Could not remove old state");
         self.fxn_evals
             .pop_back()
             .expect("Could not append new dynamics evaluation");
@@ -226,6 +229,11 @@ where
         self.y_ests.push_front(data.y_nxt);
         self.fxn_evals.push_front(data.dy_nxt);
         self.times.push_front(data.t_nxt);
+
+        // TODO: DEAL WITH LATER
+        if !self.fn_corr_last.is_some() {
+            self.fn_corr_last = Some(self.fxn_evals[1].clone())
+        }
 
         // compute correction
         let quadrature: VectorN<f64, N> = data
@@ -238,23 +246,27 @@ where
             .sum();
 
         let dt = self.times[0] - self.times[1];
-
+        /*
         let root_problem = |y_n: &VectorN<f64, N>| {
             y_n - (&self.y_ests[1] + dt * (self.dynamics)(self.times[0], y_n)
                 - dt * &self.fxn_evals[0]
                 + &quadrature)
         };
-
-        self.y_ests[0] =
+        */
+        self.y_ests[0] = &self.y_ests[1] + dt * (self.fn_corr_last.as_ref().unwrap() - &self.fxn_evals[1]) + &quadrature;
+        
+        /*
             newton_raphson_broyden(root_problem, self.y_ests[0].clone(), self.convergence_tol)
                 .expect("Couldn't converge to solution");
-
+        */
         // re-evaluate the dynamics function
-        self.fxn_evals[0] = (self.dynamics)(self.times[0], &self.y_ests[0]);
+        // TODO: EDITED
+        self.fn_corr_last = Some((self.dynamics)(self.times[0], &self.y_ests[0]));
 
+        // TODO: EDITED
         let data_new = IVPSolMsg::PROCESS(IVPSolData {
             y_nxt: self.y_ests[0].clone(),
-            dy_nxt: self.fxn_evals[0].clone(),
+            dy_nxt: self.fn_corr_last.as_ref().unwrap().clone(),
             t_nxt: self.times[0].clone(),
             weights: data.weights,
         });

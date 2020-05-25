@@ -238,7 +238,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_time_to_acc_1d_adaptive_ridc_correction() {
         let time_end = 10.0;
         let dt = time_end - ONE_D_INIT_TIME;

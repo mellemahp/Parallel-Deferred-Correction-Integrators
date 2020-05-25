@@ -59,7 +59,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_time_to_acc_kep_0001() {
         // INitial state
         let kep_init = ISTATE_GTO.clone();
@@ -160,8 +159,8 @@ mod tests {
                 println!("{:?}, {:?}, {:?}, {:?}", integ, dur, diff_pos, diff_vel);
             }
         }
-        for c in vec![4] {
-            for step in vec![100.0, 50.0, 10.0, 5.0, 4.0, 1.0] {
+        for c in vec![3, 4, 5] {
+            for step in vec![100.0, 50.0, 10.0, 5.0, 4.0, 1.0, 0.1] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector6::repeat(1e-9)),
                     rtol: Some(1e-6),
@@ -193,10 +192,9 @@ mod tests {
                 );
             }
         }
-        println!("STARTING DAT SEXY PARALLEL INTEGRATION");
         // test adaptive RIDC
-        for n in vec![4] {
-            for acc in vec![1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64] {
+        for n in vec![3, 4, 5] {
+            for acc in vec![1e-6_f64, 1e-7_f64, 1e-8_f64, 1e-9_f64, 1e-10_f64, 1e-11_f64] {
                 let par_options = IntegOptionsParallel {
                     atol: Some(Vector6::repeat(acc)),
                     rtol: Some(acc * 10e3_f64),
